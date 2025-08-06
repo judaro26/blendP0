@@ -1,5 +1,7 @@
 {
+  "name": "netlify-python-project",
+  "version": "1.0.0",
   "devDependencies": {
-    "netlify-plugin-python": "^0.1.0"
+    "netlify-plugin-python": "github:netlify/netlify-plugin-python"
   }
 }
