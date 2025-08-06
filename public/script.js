@@ -44,7 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             
             statusMessage('Sending data to backend for processing...');
-            const response = await fetch('/.netlify/functions/main', {
+            const response = await fetch('/.netlify/functions/p0', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
