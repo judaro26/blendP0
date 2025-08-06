@@ -1,6 +1,3 @@
 [build]
   publish = "public"
   functions = "functions"
-
-[functions]
-  python_version = "3.9"  # Specify the Python version for your functions
