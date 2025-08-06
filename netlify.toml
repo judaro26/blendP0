@@ -1,11 +1,7 @@
-[build]
-  publish = "public"
-  functions = "functions"
-
 [functions]
-  directory = "functions"
-  external_node_modules = []
-  included_files = ["functions/**"]
+  directory = "functions"
+  external_node_modules = []
+  included_files = ["functions/**"]
 
 [functions."p0"]
-  runtime = "python3.9"
+  runtime = "python3.9"
