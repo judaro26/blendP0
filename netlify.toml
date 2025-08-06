@@ -1,1 +1,6 @@
-ddd
+[build]
+  publish = "public"      # Where to find your front-end files
+  functions = "functions" # Where to find your serverless functions
+
+[functions]
+  python_version = "3.9"  # Specify the Python version for your functions
