@@ -4,3 +4,4 @@
 
 [functions]
   directory = "functions"
+  timeout = 900
