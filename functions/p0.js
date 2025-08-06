@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 import { parse } from 'csv-parse/sync';
 import FormData from 'form-data';
 
