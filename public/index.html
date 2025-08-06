@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSV Data Processor</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>CSV Data Processor & Mode/Freshdesk Integrator</h1>
+        <p>Upload your CSV, fetch a report from Mode Analytics, match the data, and create Freshdesk tickets.</p>
+
+        <div id="status-message" class="info-message">
+            Note: This app uses Netlify Functions for backend logic.
+        </div>
+
+        <form id="upload-form">
+            <label for="csv-file">Upload User CSV File</label>
+            <input type="file" id="csv-file" accept=".csv" required>
+
+            <h2>Freshdesk Ticket Settings</h2>
+            <label for="test-mode">
+                <input type="checkbox" id="test-mode">
+                Enable Test Mode (send all tickets to a single email)
+            </label>
+            <div id="test-email-group" style="display: none;">
+                <label for="test-email">Test Email Address:</label>
+                <input type="email" id="test-email" value="test@example.com">
+            </div>
+
+            <label for="custom-subject">Custom Subject Line:</label>
+            <input type="text" id="custom-subject" value="Impact Report for [Deployment Name]">
+
+            <label for="custom-body">Custom Email Body:</label>
+            <textarea id="custom-body" rows="10">Dear team,
+
+We identified an issue affecting the Builder workflow that resulted in some customers experiencing prolonged loading screens. The issue has since been resolved following a successful hotfix that was deployed tonight.
+
+We are actively remediating any impacted applications and are including a detailed impact lists with the affected clients.
+
+Please find the attached impact list for [Deployment Name].
+
+Please don't hesitate to reach back with any additional question, suggestion or update. I am just a click away!
+
+All the best,
+
+Blend Support</textarea>
+
+            <button type="submit" id="process-button">Start Processing</button>
+        </form>
+
+        <div id="results"></div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
