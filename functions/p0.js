@@ -59,7 +59,7 @@ export async function handler(event, context) {
     // Poll status
     let succeeded = false;
     const pollUrl = `${MODE_RUN_URL}/${runToken}`;
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 5; i++) {
       const statusResp = await fetch(pollUrl, {
         headers: { Authorization: `Basic ${MODE_AUTH_TOKEN}` }
       });
