@@ -1,0 +1,5 @@
+{
+  "devDependencies": {
+    "netlify-plugin-python": "^0.1.0"
+  }
+}
