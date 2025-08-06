@@ -4,9 +4,3 @@
 
 [functions]
   directory = "functions"
-
-[functions."p0"]
-  runtime = "python3.9"
-
-[[plugins]]
-  package = "netlify-plugin-python"
