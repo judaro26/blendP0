@@ -1,9 +1,0 @@
-{
-  "name": "netlify-python-functions",
-  "version": "1.0.0",
-  "description": "Netlify project with Python serverless functions",
-  "scripts": {},
-  "devDependencies": {
-    "netlify-plugin-python": "^1.1.0"
-  }
-}
