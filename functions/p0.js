@@ -4,7 +4,7 @@ import FormData from 'form-data';
 const POLL_INTERVAL_MS = 5000;
 const MAX_POLL_ATTEMPTS = 6;  // 6 * 5 sec = 30 sec max polling
 
-export async function handler(event, context) {
+export async function handler(event) {
   if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,
