@@ -213,25 +213,16 @@ exports.handler = async function(event) {
           });
 
           console.log('-- Creating Freshdesk ticket...');
-          // Get the headers from the form-data object
-          const formHeaders = form.getHeaders();
-          // Add the Authorization header to the headers object
-          formHeaders.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
-          
-          // Calculate the length of the form data
-          console.log('-- Creating Freshdesk ticket...');
-          
-          // Get headers from the form-data object
+          // Get headers with boundary from form-data and add Authorization header
           const headers = form.getHeaders();
           headers.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
-          
-          // Use the stream from form-data to send the request body
+
           const fdResp = await fetch(FRESHDESK_API_URL, {
-              method: 'POST',
-              body: form,
-              headers: headers,
-              // The following option is necessary to handle stream data with Node.js fetch
-              duplex: 'half'
+            method: 'POST',
+            body: form,
+            headers: headers,
+            // The following option is necessary to handle stream data with Node.js fetch
+            duplex: 'half'
           });
 
           const fdResult = await fdResp.json();
