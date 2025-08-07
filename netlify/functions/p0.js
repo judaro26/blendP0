@@ -219,20 +219,19 @@ exports.handler = async function(event) {
           formHeaders.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
           
           // Calculate the length of the form data
-          const formLength = await new Promise((resolve, reject) => {
-              form.getLength((err, length) => {
-                  if (err) reject(err);
-                  resolve(length);
-              });
-          });
+          console.log('-- Creating Freshdesk ticket...');
           
-          // Add the Content-Length header
-          formHeaders['Content-Length'] = formLength;
+          // Get headers from the form-data object
+          const headers = form.getHeaders();
+          headers.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
           
+          // Use the stream from form-data to send the request body
           const fdResp = await fetch(FRESHDESK_API_URL, {
-            method: 'POST',
-            body: form,
-            headers: formHeaders, // Use the dynamically created headers
+              method: 'POST',
+              body: form,
+              headers: headers,
+              // The following option is necessary to handle stream data with Node.js fetch
+              duplex: 'half'
           });
 
           const fdResult = await fdResp.json();
