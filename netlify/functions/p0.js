@@ -229,7 +229,12 @@ exports.handler = async function(event) {
       const ccEmails = enableTestMode ? [] : data.contacts.filter((e) => e !== requesterEmail);
       
       const subject = customSubject.replace('[Deployment Name]', depKey);
-      const description = customBody.replace('[Deployment Name]', depKey);
+
+      // --- NEW LOGIC TO PRESERVE FORMATTING ---
+      // Replace newline characters with HTML <br> tags.
+      const formattedBody = customBody.replace(/\n/g, '<br>');
+      const description = formattedBody.replace('[Deployment Name]', depKey);
+      // --- END NEW LOGIC ---
 
       log.push(`Creating ticket for deployment '${depKey}'. Requester: ${requesterEmail}, CCs: ${ccEmails.join(', ')}.`);
 
