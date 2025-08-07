@@ -213,12 +213,14 @@ exports.handler = async function(event) {
           });
 
           console.log('-- Creating Freshdesk ticket...');
+          // Get headers with boundary from form-data and add Authorization header
+          const headers = form.getHeaders();
+          headers.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
+
           const fdResp = await fetch(FRESHDESK_API_URL, {
             method: 'POST',
             body: form,
-            headers: {
-              Authorization: `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`,
-            },
+            headers: headers, // Use the dynamically created headers
           });
 
           const fdResult = await fdResp.json();
