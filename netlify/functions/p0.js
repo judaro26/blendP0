@@ -213,32 +213,65 @@ exports.handler = async function(event) {
           });
 
           console.log('-- Creating Freshdesk ticket...');
-          // Get headers with boundary from form-data and add Authorization header
-          const headers = form.getHeaders();
-          headers.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
-
-          const fdResp = await fetch(FRESHDESK_API_URL, {
-            method: 'POST',
-            body: form,
-            headers: headers,
-            // The following option is necessary to handle stream data with Node.js fetch
-            duplex: 'half'
+          
+          const form = new FormData();
+          form.append('subject', subject);
+          form.append('description', `${description}<br><br>--- Auto Generated ---`, { contentType: 'text/html' });
+          form.append('email', requesterEmail);
+          form.append('status', '5');
+          form.append('priority', '1');
+          form.append('group_id', FRESHDESK_TRIAGE_GROUP_ID.toString());
+          form.append('responder_id', FRESHDESK_RESPONDER_ID.toString());
+          form.append('tags[]', 'Support-emergency');
+          form.append('custom_fields[cf_blend_product]', 'Mortgage');
+          form.append('custom_fields[cf_type_of_case]', 'Issue');
+          form.append('custom_fields[cf_disposition477339]', 'P0 Comms');
+          form.append('custom_fields[cf_blend_platform]', 'Lending Platform');
+          form.append('custom_fields[cf_survey_automation]', 'No');
+          
+          ccEmails.forEach((cc) => form.append('cc_emails[]', cc));
+          
+          form.append('attachments[]', Buffer.from(impactCsv), {
+              filename: `Impact_List_${depKey}.csv`,
+              contentType: 'text/csv',
           });
-
+          
+          // Now, we will prepare the headers and body to be sent via fetch
+          const formHeaders = form.getHeaders();
+          formHeaders.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
+          
+          // This is the key change: create a promise to get the form's length
+          const formLength = await new Promise((resolve, reject) => {
+              form.getLength((err, length) => {
+                  if (err) {
+                      console.error('Error getting form length:', err);
+                      reject(err);
+                  } else {
+                      resolve(length);
+                  }
+              });
+          });
+          formHeaders['Content-Length'] = formLength;
+          
+          const fdResp = await fetch(FRESHDESK_API_URL, {
+              method: 'POST',
+              body: form,
+              headers: formHeaders,
+              // No need for duplex: 'half' as we are handling the length correctly
+          });
+          
           const fdResult = await fdResp.json();
           if (fdResp.ok) {
               console.log(`-- Successfully created ticket with ID: ${fdResult.id}`);
           } else {
               console.error(`-- Failed to create ticket. Status: ${fdResp.status}, Response: ${JSON.stringify(fdResult)}`);
           }
-
+          
           results.push({
-            deployment: depKey,
-            status: fdResp.ok ? 'Success' : 'Failed',
-            ticket_id: fdResult.id || null,
+              deployment: depKey,
+              status: fdResp.ok ? 'Success' : 'Failed',
+              ticket_id: fdResult.id || null,
           });
-      }
-    }
 
 
     // 6. Return results
