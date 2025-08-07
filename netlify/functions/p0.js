@@ -20,7 +20,8 @@ exports.handler = async function(event) {
     const testEmail = body.test_email || 'test@example.com';
     const customSubject = body.custom_subject || 'P0 Alert: [Deployment Name]';
     const customBody = body.custom_body || 'This is a generated ticket for [Deployment Name].';
-
+    const FRESHDESK_RESPONDER_ID = 156008293335;
+    
     if (!csvData) {
       return {
         statusCode: 400,
@@ -36,7 +37,6 @@ exports.handler = async function(event) {
     const FRESHDESK_API_URL = 'https://blendsupport.freshdesk.com/api/v2/tickets';
 
     const FRESHDESK_TRIAGE_GROUP_ID = 156000870331;
-    const FRESHDESK_RESPONDER_ID = 156006674011;
 
     // Parse user CSV data
     const userRecords = parse(csvData, {
@@ -50,6 +50,10 @@ exports.handler = async function(event) {
         body: JSON.stringify({ error: "CSV must include a 'tenant' column." }),
       };
     }
+    
+    // Check if the impact list contains a valid loan ID column
+    const loanIdColumn = findImpactListColumn(userRecords[0]);
+    const hasImpactList = !!loanIdColumn;
 
     // Group user records by deployment (case insensitive)
     const deployments = {};
@@ -136,26 +140,16 @@ exports.handler = async function(event) {
 
     // 4. Match Mode and Impact data by deployment
     const MODE_DEPLOYMENT_COL = 'DEPLOYMENT';
-    const IMPACT_TENANT_COL = 'tenant';
 
     if (!modeRecords[0] || !modeRecords[0][MODE_DEPLOYMENT_COL]) {
       throw new Error(`Mode report is missing the required '${MODE_DEPLOYMENT_COL}' column.`);
     }
 
-    const impactByTenant = {};
-    for (const row of userRecords) {
-      const tenantKey = (row[IMPACT_TENANT_COL] || '').toLowerCase().trim();
-      if (tenantKey) {
-        if (!impactByTenant[tenantKey]) impactByTenant[tenantKey] = [];
-        impactByTenant[tenantKey].push(row);
-      }
-    }
-
     const matchedData = {};
     for (const modeRow of modeRecords) {
       const deploymentKey = (modeRow[MODE_DEPLOYMENT_COL] || '').toLowerCase().trim();
-      if (deploymentKey && impactByTenant[deploymentKey]) {
-        const impactRows = impactByTenant[deploymentKey];
+      if (deploymentKey && deployments[deploymentKey]) {
+        const impactRows = deployments[deploymentKey];
         const impactCsv = impactRows.map(r => Object.values(r).join(',')).join('\n');
 
         const emails = new Set();
@@ -179,16 +173,16 @@ exports.handler = async function(event) {
 
     for (const [depKey, data] of Object.entries(matchedData)) {
       const requesterEmail = enableTestMode ? testEmail : data.contacts[0] || null;
-      const ccEmails = data.contacts.filter((e) => e !== requesterEmail);
-
+      
       if (!requesterEmail) {
         freshdeskResults.push({ deployment: depKey, status: 'Skipped (no email)' });
         continue;
       }
-
+      
+      const ccEmails = enableTestMode ? [] : data.contacts.filter((e) => e !== requesterEmail);
+      
       const subject = customSubject.replace('[Deployment Name]', depKey);
       const description = customBody.replace('[Deployment Name]', depKey);
-      const impactCsv = data.impact_list;
 
       const form = new FormData();
       form.append('subject', subject);
@@ -207,12 +201,16 @@ exports.handler = async function(event) {
 
       ccEmails.forEach((cc) => form.append('cc_emails[]', cc));
 
-      const impactBuffer = Buffer.from(impactCsv);
-      form.append('attachments[]', impactBuffer, {
-        filename: `Impact_List_${depKey}.csv`,
-        contentType: 'text/csv',
-        knownLength: impactBuffer.length,
-      });
+      // Only append the attachment if a valid loan ID column was found
+      if (hasImpactList) {
+        const impactCsv = data.impact_list;
+        const impactBuffer = Buffer.from(impactCsv);
+        form.append('attachments[]', impactBuffer, {
+          filename: `Impact_List_${depKey}.csv`,
+          contentType: 'text/csv',
+          knownLength: impactBuffer.length,
+        });
+      }
 
       const headers = form.getHeaders();
       headers.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
@@ -248,3 +246,21 @@ exports.handler = async function(event) {
     };
   }
 };
+
+/**
+ * Checks for the presence of a valid loan ID column in a CSV record.
+ * @param {object} record The first record from the parsed CSV.
+ * @returns {string|null} The name of the first matching column, or null if none is found.
+ */
+function findImpactListColumn(record) {
+  const possibleHeaders = ['loanId', 'LOANID', 'GUID', 'guid', 'Guid', 'BlendGuid', 'Blend_Guid', 'BLEND_GUID'];
+  const recordHeaders = Object.keys(record);
+  
+  for (const header of recordHeaders) {
+    if (possibleHeaders.includes(header)) {
+      return header;
+    }
+  }
+  
+  return null;
+}
