@@ -1,6 +1,7 @@
 [build]
   publish = "public"
-  functions = "functions"
+  functions = "netlify/functions"
 
-[functions.p0]
+[functions]
+  directory = "netlify/functions"
   timeout = 900
