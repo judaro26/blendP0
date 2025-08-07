@@ -44,13 +44,20 @@ exports.handler = async function(event) {
       skip_empty_lines: true,
     });
 
+    if (!userRecords.length || (!userRecords[0].tenant && !userRecords[0].Tenant)) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ error: "CSV must include a 'tenant' column." }),
+      };
+    }
+
     // Group user records by deployment (case insensitive)
     const deployments = {};
     for (const row of userRecords) {
       const deploymentKey = (row.Tenant || row.TENANT || row.Deployment || row.DEPLOYMENT || row.tenant || '').toLowerCase().trim();
       if (deploymentKey) {
-          if (!deployments[deploymentKey]) deployments[deploymentKey] = [];
-          deployments[deploymentKey].push(row);
+        if (!deployments[deploymentKey]) deployments[deploymentKey] = [];
+        deployments[deploymentKey].push(row);
       }
     }
 
@@ -127,38 +134,44 @@ exports.handler = async function(event) {
       skip_empty_lines: true,
     });
 
-    // 4. Group user records by deployment (case insensitive)
-    const matchedData = {};
-    const modeDeploymentCol = modeRecords.length > 0
-        ? Object.keys(modeRecords[0]).find(key => key.toLowerCase() === 'deployment')
-        : null;
+    // 4. Match Mode and Impact data by deployment
+    const MODE_DEPLOYMENT_COL = 'DEPLOYMENT';
+    const IMPACT_TENANT_COL = 'tenant';
 
-    if (!modeDeploymentCol) {
-        throw new Error("Mode report is missing a 'deployment' column (case-insensitive).");
+    if (!modeRecords[0] || !modeRecords[0][MODE_DEPLOYMENT_COL]) {
+      throw new Error(`Mode report is missing the required '${MODE_DEPLOYMENT_COL}' column.`);
     }
 
-    for (const [depKey, rows] of Object.entries(deployments)) {
-        const matched = modeRecords.filter((m) =>
-            (m[modeDeploymentCol] || '').toLowerCase().trim() === depKey
-        );
+    const impactByTenant = {};
+    for (const row of userRecords) {
+      const tenantKey = (row[IMPACT_TENANT_COL] || '').toLowerCase().trim();
+      if (tenantKey) {
+        if (!impactByTenant[tenantKey]) impactByTenant[tenantKey] = [];
+        impactByTenant[tenantKey].push(row);
+      }
+    }
 
-        if (matched.length > 0) {
-            const impactCsv = rows.map((r) => Object.values(r).join(',')).join('\n');
-            
-            const emails = new Set();
-            for (const match of matched) {
-                if (match.email && match.email.includes('@')) emails.add(match.email.trim());
-                if (match.account_manager_email) {
-                    const ams = match.account_manager_email.split(/[;,\s]+/).filter((e) => e.includes('@'));
-                    ams.forEach((e) => emails.add(e.trim()));
-                }
-            }
+    const matchedData = {};
+    for (const modeRow of modeRecords) {
+      const deploymentKey = (modeRow[MODE_DEPLOYMENT_COL] || '').toLowerCase().trim();
+      if (deploymentKey && impactByTenant[deploymentKey]) {
+        const impactRows = impactByTenant[deploymentKey];
+        const impactCsv = impactRows.map(r => Object.values(r).join(',')).join('\n');
 
-            matchedData[depKey] = {
-                impact_list: impactCsv,
-                contacts: [...emails]
-            };
+        const emails = new Set();
+        if (modeRow.EMAIL && modeRow.EMAIL.includes('@')) {
+          emails.add(modeRow.EMAIL.trim());
         }
+        if (modeRow.ACCOUNT_MANAGER_EMAIL) {
+          const amEmails = modeRow.ACCOUNT_MANAGER_EMAIL.split(/[;,\s]+/).filter(e => e.includes('@'));
+          amEmails.forEach(e => emails.add(e.trim()));
+        }
+
+        matchedData[deploymentKey] = {
+          impact_list: impactCsv,
+          contacts: [...emails],
+        };
+      }
     }
 
     // 5. Create Freshdesk tickets
@@ -208,7 +221,7 @@ exports.handler = async function(event) {
         method: 'POST',
         headers: headers,
         body: form,
-        duplex: 'half'
+        duplex: 'half',
       });
 
       const fdResult = await fdResp.json();
@@ -223,8 +236,8 @@ exports.handler = async function(event) {
     return {
       statusCode: 200,
       body: JSON.stringify({
-          freshdesk_results: freshdeskResults,
-          matched_data: matchedData
+        freshdesk_results: freshdeskResults,
+        matched_data: matchedData,
       }),
     };
   } catch (err) {
