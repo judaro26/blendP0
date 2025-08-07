@@ -1,5 +1,5 @@
-import { parse } from 'csv-parse/lib/sync.js';
-import FormData from 'form-data';
+const { parse } = require('csv-parse/lib/sync.js');
+const FormData = require('form-data');
 
 const POLL_INTERVAL_MS = 5000;
 const MAX_POLL_ATTEMPTS = 6;  // 6 * 5 sec = 30 sec max polling
