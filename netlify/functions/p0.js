@@ -55,7 +55,7 @@ exports.handler = async function(event) {
     const MODE_RUN_URL = 'https://app.mode.com/api/blend/reports/77c0a6f31c3c/runs';
     const MODE_CSV_URL = 'https://app.mode.com/api/blend/reports/77c0a6f31c3c/results/content.csv';
     const FRESHDESK_API_URL = 'https://blendsupportsandbox.freshdesk.com/api/v2/tickets';
-    const FRESHDESK_TRIAGE_GROUP_ID = 156000870331;
+    const FRESHDESK_TRIAGE_GROUP_ID = 1156000870331;
 
     // Parse user CSV data
     const userRecords = parse(csvData, {
