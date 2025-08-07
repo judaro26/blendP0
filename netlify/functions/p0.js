@@ -6,10 +6,16 @@ const POLL_INTERVAL_MS = 5000;
 const MAX_POLL_ATTEMPTS = 6;  // 6 * 5 sec = 30 sec max polling
 
 exports.handler = async function(event) {
+  const log = [];
+  const startTimestamp = new Date().toISOString();
+  log.push(`Function started at ${startTimestamp}`);
+
   if (event.httpMethod !== 'POST') {
+    const errorMessage = 'Method Not Allowed';
+    log.push(`ERROR: ${errorMessage}`);
     return {
       statusCode: 405,
-      body: JSON.stringify({ error: 'Method Not Allowed' }),
+      body: JSON.stringify({ error: errorMessage, log }),
     };
   }
 
@@ -23,11 +29,15 @@ exports.handler = async function(event) {
     const FRESHDESK_RESPONDER_ID = 156008293335;
     
     if (!csvData) {
+      const errorMessage = 'No CSV data provided.';
+      log.push(`ERROR: ${errorMessage}`);
       return {
         statusCode: 400,
-        body: JSON.stringify({ error: 'No CSV data provided.' }),
+        body: JSON.stringify({ error: errorMessage, log }),
       };
     }
+
+    log.push('Received CSV data and configuration.');
 
     const MODE_AUTH_TOKEN = process.env.MODE_AUTH_TOKEN;
     const FRESHDESK_API_KEY = process.env.FRESHDESK_API_KEY;
@@ -35,7 +45,6 @@ exports.handler = async function(event) {
     const MODE_RUN_URL = 'https://app.mode.com/api/blend/reports/77c0a6f31c3c/runs';
     const MODE_CSV_URL = 'https://app.mode.com/api/blend/reports/77c0a6f31c3c/results/content.csv';
     const FRESHDESK_API_URL = 'https://blendsupport.freshdesk.com/api/v2/tickets';
-
     const FRESHDESK_TRIAGE_GROUP_ID = 156000870331;
 
     // Parse user CSV data
@@ -43,17 +52,25 @@ exports.handler = async function(event) {
       columns: true,
       skip_empty_lines: true,
     });
+    log.push(`Successfully parsed user CSV data. Found ${userRecords.length} records.`);
 
     if (!userRecords.length || (!userRecords[0].tenant && !userRecords[0].Tenant)) {
+      const errorMessage = "CSV must include a 'tenant' column.";
+      log.push(`ERROR: ${errorMessage}`);
       return {
         statusCode: 400,
-        body: JSON.stringify({ error: "CSV must include a 'tenant' column." }),
+        body: JSON.stringify({ error: errorMessage, log }),
       };
     }
     
     // Check if the impact list contains a valid loan ID column
     const loanIdColumn = findImpactListColumn(userRecords[0]);
     const hasImpactList = !!loanIdColumn;
+    if (hasImpactList) {
+      log.push(`Found impact list column: '${loanIdColumn}'. An attachment will be created.`);
+    } else {
+      log.push('No valid impact list column found. No attachment will be created.');
+    }
 
     // Group user records by deployment (case insensitive)
     const deployments = {};
@@ -64,8 +81,10 @@ exports.handler = async function(event) {
         deployments[deploymentKey].push(row);
       }
     }
+    log.push(`Grouped user records into ${Object.keys(deployments).length} deployments.`);
 
     // 1. Trigger Mode report run
+    log.push('Triggering Mode report run...');
     const runResp = await fetch(MODE_RUN_URL, {
       method: 'POST',
       headers: {
@@ -82,11 +101,13 @@ exports.handler = async function(event) {
 
     const runData = await runResp.json();
     const runToken = runData.token;
+    log.push(`Mode report run triggered successfully with token: ${runToken}`);
 
     // 2. Poll Mode report status with limited attempts
     let succeeded = false;
     const pollUrl = `${MODE_RUN_URL}/${runToken}`;
 
+    log.push('Polling Mode report status...');
     for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
       const statusResp = await fetch(pollUrl, {
         headers: { Authorization: `Basic ${MODE_AUTH_TOKEN}` },
@@ -97,6 +118,7 @@ exports.handler = async function(event) {
       }
 
       const statusData = await statusResp.json();
+      log.push(`- Poll attempt ${attempt + 1}: Status is '${statusData.state}'`);
 
       if (statusData.state === 'succeeded') {
         succeeded = true;
@@ -111,16 +133,21 @@ exports.handler = async function(event) {
     }
 
     if (!succeeded) {
+      const warningMessage = 'Mode report is still processing after maximum attempts. Please try again later.';
+      log.push(`WARNING: ${warningMessage}`);
       return {
         statusCode: 202,
         body: JSON.stringify({
-          message: 'Mode report is still processing. Please try again later with the same run token.',
+          message: warningMessage,
           run_token: runToken,
+          log,
         }),
       };
     }
+    log.push('Mode report run succeeded.');
 
     // 3. Fetch Mode CSV content
+    log.push('Fetching Mode report CSV content...');
     const modeCsvResp = await fetch(MODE_CSV_URL, {
       headers: {
         Authorization: `Basic ${MODE_AUTH_TOKEN}`,
@@ -137,12 +164,15 @@ exports.handler = async function(event) {
       columns: true,
       skip_empty_lines: true,
     });
+    log.push(`Successfully parsed Mode report. Found ${modeRecords.length} records.`);
 
     // 4. Match Mode and Impact data by deployment
     const MODE_DEPLOYMENT_COL = 'DEPLOYMENT';
 
     if (!modeRecords[0] || !modeRecords[0][MODE_DEPLOYMENT_COL]) {
-      throw new Error(`Mode report is missing the required '${MODE_DEPLOYMENT_COL}' column.`);
+      const errorMessage = `Mode report is missing the required '${MODE_DEPLOYMENT_COL}' column.`;
+      log.push(`ERROR: ${errorMessage}`);
+      throw new Error(errorMessage);
     }
 
     const matchedData = {};
@@ -160,13 +190,19 @@ exports.handler = async function(event) {
           const amEmails = modeRow.ACCOUNT_MANAGER_EMAIL.split(/[;,\s]+/).filter(e => e.includes('@'));
           amEmails.forEach(e => emails.add(e.trim()));
         }
-
-        matchedData[deploymentKey] = {
-          impact_list: impactCsv,
-          contacts: [...emails],
-        };
+        
+        if (emails.size > 0) {
+          matchedData[deploymentKey] = {
+            impact_list: impactCsv,
+            contacts: [...emails],
+          };
+          log.push(`Match found for deployment '${deploymentKey}'. Collected ${emails.size} contact emails.`);
+        } else {
+          log.push(`Match found for deployment '${deploymentKey}', but no valid email contacts were found. Skipping ticket creation for this deployment.`);
+        }
       }
     }
+    log.push(`Found matches for ${Object.keys(matchedData).length} deployments.`);
 
     // 5. Create Freshdesk tickets
     const freshdeskResults = [];
@@ -175,6 +211,7 @@ exports.handler = async function(event) {
       const requesterEmail = enableTestMode ? testEmail : data.contacts[0] || null;
       
       if (!requesterEmail) {
+        log.push(`SKIPPED: Ticket for deployment '${depKey}' skipped because no requester email could be determined.`);
         freshdeskResults.push({ deployment: depKey, status: 'Skipped (no email)' });
         continue;
       }
@@ -183,6 +220,8 @@ exports.handler = async function(event) {
       
       const subject = customSubject.replace('[Deployment Name]', depKey);
       const description = customBody.replace('[Deployment Name]', depKey);
+
+      log.push(`Creating ticket for deployment '${depKey}'. Requester: ${requesterEmail}, CCs: ${ccEmails.join(', ')}.`);
 
       const form = new FormData();
       form.append('subject', subject);
@@ -201,7 +240,6 @@ exports.handler = async function(event) {
 
       ccEmails.forEach((cc) => form.append('cc_emails[]', cc));
 
-      // Only append the attachment if a valid loan ID column was found
       if (hasImpactList) {
         const impactCsv = data.impact_list;
         const impactBuffer = Buffer.from(impactCsv);
@@ -210,6 +248,7 @@ exports.handler = async function(event) {
           contentType: 'text/csv',
           knownLength: impactBuffer.length,
         });
+        log.push(`- Attached impact list for '${depKey}'.`);
       }
 
       const headers = form.getHeaders();
@@ -223,35 +262,44 @@ exports.handler = async function(event) {
       });
 
       const fdResult = await fdResp.json();
+      if (fdResp.ok) {
+        log.push(`SUCCESS: Freshdesk ticket created for '${depKey}' with ID: ${fdResult.id}`);
+      } else {
+        log.push(`FAILED: Freshdesk ticket for '${depKey}' failed with status ${fdResp.status}. Error: ${JSON.stringify(fdResult)}`);
+      }
+      
       freshdeskResults.push({
         deployment: depKey,
         status: fdResp.ok ? 'Success' : 'Failed',
         ticket_id: fdResult.id || null,
+        error_details: fdResp.ok ? null : fdResult,
       });
     }
 
     // 6. Return results
+    const endTimestamp = new Date().toISOString();
+    log.push(`Function finished at ${endTimestamp}`);
+
     return {
       statusCode: 200,
       body: JSON.stringify({
+        message: 'Processing complete. See log for details.',
         freshdesk_results: freshdeskResults,
         matched_data: matchedData,
+        log,
       }),
     };
   } catch (err) {
+    const errorMessage = err.message || 'An unexpected error occurred.';
+    log.push(`CRITICAL ERROR: ${errorMessage}`);
     console.error('Handler error:', err);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: err.message || 'Internal Server Error' }),
+      body: JSON.stringify({ error: errorMessage, log }),
     };
   }
 };
 
-/**
- * Checks for the presence of a valid loan ID column in a CSV record.
- * @param {object} record The first record from the parsed CSV.
- * @returns {string|null} The name of the first matching column, or null if none is found.
- */
 function findImpactListColumn(record) {
   const possibleHeaders = ['loanId', 'LOANID', 'GUID', 'guid', 'Guid', 'BlendGuid', 'Blend_Guid', 'BLEND_GUID'];
   const recordHeaders = Object.keys(record);
