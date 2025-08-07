@@ -36,7 +36,7 @@ exports.handler = async function(event) {
     const FRESHDESK_API_URL = 'https://blendsupport.freshdesk.com/api/v2/tickets';
 
     const FRESHDESK_TRIAGE_GROUP_ID = 156000870331;
-    const FRESHDESK_RESPONDER_ID = 156006674011;
+    const FRESHDESK_RESPONDER_ID = 156008293335;
 
     const userRecords = parse(csvData, {
       columns: true,
