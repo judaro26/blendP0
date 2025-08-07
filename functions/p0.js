@@ -1,4 +1,4 @@
-import { parse } from 'csv-parse/sync';
+import { parse } from 'csv-parse/sync.js';
 import FormData from 'form-data';
 
 const POLL_INTERVAL_MS = 5000;
