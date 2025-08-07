@@ -216,12 +216,11 @@ exports.handler = async function(event) {
           // Get headers with boundary from form-data and add Authorization header
           const headers = form.getHeaders();
           headers.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
-
+          
           const fdResp = await fetch(FRESHDESK_API_URL, {
             method: 'POST',
             body: form,
             headers: headers,
-            // The following option is necessary to handle stream data with Node.js fetch
             duplex: 'half'
           });
 
