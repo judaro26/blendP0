@@ -2,15 +2,11 @@
   "name": "blend-netlify-functions",
   "version": "1.0.0",
   "description": "Netlify functions for Blend P0 Freshdesk tickets",
-  "main": "functions/p0.js",
-  "scripts": {
-    "build": "echo 'No build step needed'"
-  },
+  "type": "module",
   "dependencies": {
     "csv-parse": "^5.4.0",
     "form-data": "^4.0.0"
   },
-  "type": "module",
   "engines": {
     "node": ">=18"
   }
