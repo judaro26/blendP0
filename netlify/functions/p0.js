@@ -213,10 +213,21 @@ exports.handler = async function(event) {
           });
 
           console.log('-- Creating Freshdesk ticket...');
-          // Get the correct headers for multipart/form-data from the FormData object
+          // Get the headers from the form-data object
           const formHeaders = form.getHeaders();
           // Add the Authorization header to the headers object
           formHeaders.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
+          
+          // Calculate the length of the form data
+          const formLength = await new Promise((resolve, reject) => {
+              form.getLength((err, length) => {
+                  if (err) reject(err);
+                  resolve(length);
+              });
+          });
+          
+          // Add the Content-Length header
+          formHeaders['Content-Length'] = formLength;
           
           const fdResp = await fetch(FRESHDESK_API_URL, {
             method: 'POST',
