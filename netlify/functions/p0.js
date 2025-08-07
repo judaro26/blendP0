@@ -207,10 +207,13 @@ exports.handler = async function(event) {
           
           ccEmails.forEach((cc) => form.append('cc_emails[]', cc));
           
-          form.append('attachments[]', Buffer.from(impactCsv), {
+          const impactBuffer = Buffer.from(impactCsv);
+          form.append('attachments[]', impactBuffer, {
             filename: `Impact_List_${depKey}.csv`,
             contentType: 'text/csv',
+            knownLength: impactBuffer.length,
           });
+
 
           console.log('-- Creating Freshdesk ticket...');
           // Get headers with boundary from form-data and add Authorization header
@@ -221,7 +224,6 @@ exports.handler = async function(event) {
             method: 'POST',
             body: form,
             headers: headers,
-            duplex: 'half'
           });
 
           const fdResult = await fdResp.json();
