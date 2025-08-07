@@ -28,6 +28,19 @@ exports.handler = async function(event) {
     const customBody = body.custom_body || 'This is a generated ticket for [Deployment Name].';
     const FRESHDESK_RESPONDER_ID = 156008293335;
     
+    // Retrieve credentials from the payload instead of environment variables
+    const MODE_AUTH_TOKEN = body.mode_auth_token;
+    const FRESHDESK_API_KEY = body.freshdesk_api_key;
+
+    if (!MODE_AUTH_TOKEN || !FRESHDESK_API_KEY) {
+        const errorMessage = 'Missing API credentials in the request body.';
+        log.push(`ERROR: ${errorMessage}`);
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ error: errorMessage, log }),
+        };
+    }
+    
     if (!csvData) {
       const errorMessage = 'No CSV data provided.';
       log.push(`ERROR: ${errorMessage}`);
@@ -38,9 +51,6 @@ exports.handler = async function(event) {
     }
 
     log.push('Received CSV data and configuration.');
-
-    const MODE_AUTH_TOKEN = process.env.MODE_AUTH_TOKEN;
-    const FRESHDESK_API_KEY = process.env.FRESHDESK_API_KEY;
 
     const MODE_RUN_URL = 'https://app.mode.com/api/blend/reports/77c0a6f31c3c/runs';
     const MODE_CSV_URL = 'https://app.mode.com/api/blend/reports/77c0a6f31c3c/results/content.csv';
