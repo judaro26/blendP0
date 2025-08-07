@@ -1,4 +1,4 @@
-const { parse } = require('csv-parse/lib/sync.js');
+const { parse } = require('csv-parse/sync');
 const FormData = require('form-data');
 
 const POLL_INTERVAL_MS = 5000;
