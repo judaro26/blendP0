@@ -3,7 +3,7 @@ const FormData = require('form-data');
 const fetch = require('node-fetch');
 
 const POLL_INTERVAL_MS = 5000;
-const MAX_POLL_ATTEMPTS = 6;
+const MAX_POLL_ATTEMPTS = 6;  // 6 * 5 sec = 30 sec max polling
 
 exports.handler = async function(event) {
   if (event.httpMethod !== 'POST') {
@@ -36,22 +36,25 @@ exports.handler = async function(event) {
     const FRESHDESK_API_URL = 'https://blendsupport.freshdesk.com/api/v2/tickets';
 
     const FRESHDESK_TRIAGE_GROUP_ID = 156000870331;
-    const FRESHDESK_RESPONDER_ID = 156008293335;
+    const FRESHDESK_RESPONDER_ID = 156006674011;
 
+    // Parse user CSV data
     const userRecords = parse(csvData, {
       columns: true,
       skip_empty_lines: true,
     });
 
+    // Group user records by deployment (case insensitive)
     const deployments = {};
     for (const row of userRecords) {
-      const key = (row.Tenant || row.TENANT || row.Deployment || row.DEPLOYMENT || row.tenant || '').toLowerCase().trim();
-      if (key) {
-        if (!deployments[key]) deployments[key] = [];
-        deployments[key].push(row);
+      const deploymentKey = (row.Tenant || row.TENANT || row.Deployment || row.DEPLOYMENT || row.tenant || '').toLowerCase().trim();
+      if (deploymentKey) {
+          if (!deployments[deploymentKey]) deployments[deploymentKey] = [];
+          deployments[deploymentKey].push(row);
       }
     }
 
+    // 1. Trigger Mode report run
     const runResp = await fetch(MODE_RUN_URL, {
       method: 'POST',
       headers: {
@@ -69,6 +72,7 @@ exports.handler = async function(event) {
     const runData = await runResp.json();
     const runToken = runData.token;
 
+    // 2. Poll Mode report status with limited attempts
     let succeeded = false;
     const pollUrl = `${MODE_RUN_URL}/${runToken}`;
 
@@ -82,6 +86,7 @@ exports.handler = async function(event) {
       }
 
       const statusData = await statusResp.json();
+
       if (statusData.state === 'succeeded') {
         succeeded = true;
         break;
@@ -104,6 +109,7 @@ exports.handler = async function(event) {
       };
     }
 
+    // 3. Fetch Mode CSV content
     const modeCsvResp = await fetch(MODE_CSV_URL, {
       headers: {
         Authorization: `Basic ${MODE_AUTH_TOKEN}`,
@@ -121,86 +127,105 @@ exports.handler = async function(event) {
       skip_empty_lines: true,
     });
 
-    const results = [];
+    // 4. Group user records by deployment (case insensitive)
+    const matchedData = {};
     const modeDeploymentCol = modeRecords.length > 0
-      ? Object.keys(modeRecords[0]).find(key => key.toLowerCase() === 'deployment')
-      : null;
+        ? Object.keys(modeRecords[0]).find(key => key.toLowerCase() === 'deployment')
+        : null;
 
     if (!modeDeploymentCol) {
-      results.push({ deployment: 'all', status: 'Failed', error: 'Mode report missing deployment column' });
-    } else {
-      for (const [depKey, rows] of Object.entries(deployments)) {
-        const matched = modeRecords.filter((m) =>
-          (m[modeDeploymentCol] || '').toLowerCase().trim() === depKey
-        );
-
-        const emails = new Set();
-        for (const match of matched) {
-          if (match.email && match.email.includes('@')) emails.add(match.email.trim());
-          if (match.account_manager_email) {
-            const ams = match.account_manager_email.split(/[;,\s]+/).filter((e) => e.includes('@'));
-            ams.forEach((e) => emails.add(e.trim()));
-          }
-        }
-
-        const requesterEmail = enableTestMode ? testEmail : [...emails][0] || null;
-        const ccEmails = [...emails].filter((e) => e !== requesterEmail);
-
-        if (!requesterEmail) {
-          results.push({ deployment: depKey, status: 'Skipped (no email)' });
-          continue;
-        }
-
-        const subject = customSubject.replace('[Deployment Name]', depKey);
-        const description = customBody.replace('[Deployment Name]', depKey);
-        const impactCsv = rows.map((r) => Object.values(r).join(',')).join('\n');
-
-        const form = new FormData();
-        form.append('subject', subject);
-        form.append('description', `${description}<br><br>--- Auto Generated ---`, { contentType: 'text/html' });
-        form.append('email', requesterEmail);
-        form.append('status', '5');
-        form.append('priority', '1');
-        form.append('group_id', FRESHDESK_TRIAGE_GROUP_ID.toString());
-        form.append('responder_id', FRESHDESK_RESPONDER_ID.toString());
-        form.append('tags[]', 'Support-emergency');
-        form.append('custom_fields[cf_blend_product]', 'Mortgage');
-        form.append('custom_fields[cf_type_of_case]', 'Issue');
-        form.append('custom_fields[cf_disposition477339]', 'P0 Comms');
-        form.append('custom_fields[cf_blend_platform]', 'Lending Platform');
-        form.append('custom_fields[cf_survey_automation]', 'No');
-
-        ccEmails.forEach((cc) => form.append('cc_emails[]', cc));
-
-        // ✅ Correct Buffer handling with knownLength
-        const impactBuffer = Buffer.from(impactCsv);
-        form.append('attachments[]', impactBuffer, {
-          filename: `Impact_List_${depKey}.csv`,
-          contentType: 'text/csv',
-          knownLength: impactBuffer.length,
-        });
-
-        const headers = form.getHeaders();
-        headers.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
-
-        const fdResp = await fetch(FRESHDESK_API_URL, {
-          method: 'POST',
-          headers: headers,
-          body: form,
-        });
-
-        const fdResult = await fdResp.json();
-        results.push({
-          deployment: depKey,
-          status: fdResp.ok ? 'Success' : 'Failed',
-          ticket_id: fdResult.id || null,
-        });
-      }
+        throw new Error("Mode report is missing a 'deployment' column (case-insensitive).");
     }
 
+    for (const [depKey, rows] of Object.entries(deployments)) {
+        const matched = modeRecords.filter((m) =>
+            (m[modeDeploymentCol] || '').toLowerCase().trim() === depKey
+        );
+
+        if (matched.length > 0) {
+            const impactCsv = rows.map((r) => Object.values(r).join(',')).join('\n');
+            
+            const emails = new Set();
+            for (const match of matched) {
+                if (match.email && match.email.includes('@')) emails.add(match.email.trim());
+                if (match.account_manager_email) {
+                    const ams = match.account_manager_email.split(/[;,\s]+/).filter((e) => e.includes('@'));
+                    ams.forEach((e) => emails.add(e.trim()));
+                }
+            }
+
+            matchedData[depKey] = {
+                impact_list: impactCsv,
+                contacts: [...emails]
+            };
+        }
+    }
+
+    // 5. Create Freshdesk tickets
+    const freshdeskResults = [];
+
+    for (const [depKey, data] of Object.entries(matchedData)) {
+      const requesterEmail = enableTestMode ? testEmail : data.contacts[0] || null;
+      const ccEmails = data.contacts.filter((e) => e !== requesterEmail);
+
+      if (!requesterEmail) {
+        freshdeskResults.push({ deployment: depKey, status: 'Skipped (no email)' });
+        continue;
+      }
+
+      const subject = customSubject.replace('[Deployment Name]', depKey);
+      const description = customBody.replace('[Deployment Name]', depKey);
+      const impactCsv = data.impact_list;
+
+      const form = new FormData();
+      form.append('subject', subject);
+      form.append('description', `${description}<br><br>--- Auto Generated ---`, { contentType: 'text/html' });
+      form.append('email', requesterEmail);
+      form.append('status', '5');
+      form.append('priority', '1');
+      form.append('group_id', FRESHDESK_TRIAGE_GROUP_ID.toString());
+      form.append('responder_id', FRESHDESK_RESPONDER_ID.toString());
+      form.append('tags[]', 'Support-emergency');
+      form.append('custom_fields[cf_blend_product]', 'Mortgage');
+      form.append('custom_fields[cf_type_of_case]', 'Issue');
+      form.append('custom_fields[cf_disposition477339]', 'P0 Comms');
+      form.append('custom_fields[cf_blend_platform]', 'Lending Platform');
+      form.append('custom_fields[cf_survey_automation]', 'No');
+
+      ccEmails.forEach((cc) => form.append('cc_emails[]', cc));
+
+      const impactBuffer = Buffer.from(impactCsv);
+      form.append('attachments[]', impactBuffer, {
+        filename: `Impact_List_${depKey}.csv`,
+        contentType: 'text/csv',
+        knownLength: impactBuffer.length,
+      });
+
+      const headers = form.getHeaders();
+      headers.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
+
+      const fdResp = await fetch(FRESHDESK_API_URL, {
+        method: 'POST',
+        headers: headers,
+        body: form,
+        duplex: 'half'
+      });
+
+      const fdResult = await fdResp.json();
+      freshdeskResults.push({
+        deployment: depKey,
+        status: fdResp.ok ? 'Success' : 'Failed',
+        ticket_id: fdResult.id || null,
+      });
+    }
+
+    // 6. Return results
     return {
       statusCode: 200,
-      body: JSON.stringify({ freshdesk_results: results }),
+      body: JSON.stringify({
+          freshdesk_results: freshdeskResults,
+          matched_data: matchedData
+      }),
     };
   } catch (err) {
     console.error('Handler error:', err);
