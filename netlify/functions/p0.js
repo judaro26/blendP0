@@ -42,8 +42,14 @@ exports.handler = async function(event) {
       columns: true,
       skip_empty_lines: true,
     });
+    console.log('User CSV records parsed. Found deployments to process:', Object.keys(userRecords.reduce((acc, row) => {
+        const key = (row.Tenant || row.TENANT || row.Deployment || row.DEPLOYMENT || row.tenant || '').toLowerCase().trim();
+        if (key) acc[key] = true;
+        return acc;
+    }, {})));
 
     // 1. Trigger Mode report run
+    console.log('Step 1: Triggering Mode report run...');
     const runResp = await fetch(MODE_RUN_URL, {
       method: 'POST',
       headers: {
@@ -60,11 +66,13 @@ exports.handler = async function(event) {
 
     const runData = await runResp.json();
     const runToken = runData.token;
+    console.log('Mode report run triggered. Run token:', runToken);
 
     // 2. Poll Mode report status with limited attempts
     let succeeded = false;
     const pollUrl = `${MODE_RUN_URL}/${runToken}`;
 
+    console.log('Step 2: Polling Mode report status...');
     for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
       const statusResp = await fetch(pollUrl, {
         headers: { Authorization: `Basic ${MODE_AUTH_TOKEN}` },
@@ -75,6 +83,7 @@ exports.handler = async function(event) {
       }
 
       const statusData = await statusResp.json();
+      console.log(`- Attempt ${attempt + 1}: Status is '${statusData.state}'...`);
 
       if (statusData.state === 'succeeded') {
         succeeded = true;
@@ -89,7 +98,7 @@ exports.handler = async function(event) {
     }
 
     if (!succeeded) {
-      // Poll timed out, return partial status so client can retry poll later
+      console.log('Mode report polling timed out.');
       return {
         statusCode: 202,
         body: JSON.stringify({
@@ -98,8 +107,10 @@ exports.handler = async function(event) {
         }),
       };
     }
+    console.log('Mode report succeeded.');
 
     // 3. Fetch Mode CSV content
+    console.log('Step 3: Fetching Mode report content...');
     const modeCsvResp = await fetch(MODE_CSV_URL, {
       headers: {
         Authorization: `Basic ${MODE_AUTH_TOKEN}`,
@@ -112,91 +123,122 @@ exports.handler = async function(event) {
     }
 
     const modeCsvText = await modeCsvResp.text();
-
     const modeRecords = parse(modeCsvText, {
       columns: true,
       skip_empty_lines: true,
     });
+    console.log(`Mode report fetched. Found ${modeRecords.length} records.`);
+    if (modeRecords.length > 0) {
+        console.log('Mode report column headers:', Object.keys(modeRecords[0]));
+    }
+
 
     // 4. Group user records by deployment (case insensitive)
+    console.log('Step 4: Grouping user records...');
     const deployments = {};
     for (const row of userRecords) {
-      const deploymentKey = (row.Tenant || row.TENANT || row.Deployment || row.DEPLOYMENT || '').toLowerCase().trim();
-      if (!deployments[deploymentKey]) deployments[deploymentKey] = [];
-      deployments[deploymentKey].push(row);
+      // Added 'tenant' to the list of acceptable deployment keys
+      const deploymentKey = (row.Tenant || row.TENANT || row.Deployment || row.DEPLOYMENT || row.tenant || '').toLowerCase().trim();
+      if (deploymentKey) {
+          if (!deployments[deploymentKey]) deployments[deploymentKey] = [];
+          deployments[deploymentKey].push(row);
+      }
     }
+    console.log('User records grouped into these deployments:', Object.keys(deployments));
+
 
     // 5. Match and create Freshdesk tickets
+    console.log('Step 5: Matching and creating Freshdesk tickets...');
     const results = [];
+    const modeDeploymentCol = modeRecords.length > 0 ? Object.keys(modeRecords[0]).find(key => key.toLowerCase() === 'deployment') : null;
+    
+    if (!modeDeploymentCol) {
+        console.error("Mode report is missing a 'deployment' column (case-insensitive). Skipping ticket creation.");
+        results.push({ deployment: 'all', status: 'Failed', error: 'Mode report missing deployment column' });
+    } else {
+      console.log(`Mode report deployment column found: '${modeDeploymentCol}'`);
+      for (const [depKey, rows] of Object.entries(deployments)) {
+          console.log(`- Processing deployment: '${depKey}'...`);
+          
+          // Use the dynamically found column name for matching
+          const matched = modeRecords.filter((m) => (m[modeDeploymentCol] || '').toLowerCase().trim() === depKey);
 
-    for (const [depKey, rows] of Object.entries(deployments)) {
-      // Find matching Mode deployment records (case-insensitive)
-      const matched = modeRecords.filter((m) => (m.Deployment || '').toLowerCase().trim() === depKey);
+          console.log(`-- Found ${matched.length} matching records in Mode report.`);
 
-      // Collect emails (contacts + AMs)
-      const emails = new Set();
+          const emails = new Set();
+          for (const match of matched) {
+            if (match.email && match.email.includes('@')) emails.add(match.email.trim());
+            if (match.account_manager_email) {
+              const ams = match.account_manager_email.split(/[;,\s]+/).filter((e) => e.includes('@'));
+              ams.forEach((e) => emails.add(e.trim()));
+            }
+          }
 
-      for (const match of matched) {
-        if (match.email && match.email.includes('@')) emails.add(match.email.trim());
-        if (match.account_manager_email) {
-          const ams = match.account_manager_email.split(/[;,\s]+/).filter((e) => e.includes('@'));
-          ams.forEach((e) => emails.add(e.trim()));
-        }
+          const requesterEmail = enableTestMode ? testEmail : [...emails][0] || null;
+          const ccEmails = [...emails].filter((e) => e !== requesterEmail);
+          
+          console.log(`-- Requester email: ${requesterEmail}`);
+          console.log(`-- CC emails: ${ccEmails.join(', ')}`);
+
+          if (!requesterEmail) {
+            console.warn(`-- Skipping ticket for '${depKey}': No valid requester email found.`);
+            results.push({ deployment: depKey, status: 'Skipped (no email)' });
+            continue;
+          }
+
+          const subject = customSubject.replace('[Deployment Name]', depKey);
+          const description = customBody.replace('[Deployment Name]', depKey);
+          const impactCsv = rows.map((r) => Object.values(r).join(',')).join('\n');
+
+          const form = new FormData();
+          form.append('subject', subject);
+          form.append('description', `${description}<br><br>--- Auto Generated ---`, { contentType: 'text/html' });
+          form.append('email', requesterEmail);
+          form.append('status', '5');
+          form.append('priority', '1');
+          form.append('group_id', FRESHDESK_TRIAGE_GROUP_ID.toString());
+          form.append('responder_id', FRESHDESK_RESPONDER_ID.toString());
+          form.append('tags[]', 'Support-emergency');
+          form.append('custom_fields[cf_blend_product]', 'Mortgage');
+          form.append('custom_fields[cf_type_of_case]', 'Issue');
+          form.append('custom_fields[cf_disposition477339]', 'P0 Comms');
+          form.append('custom_fields[cf_blend_platform]', 'Lending Platform');
+          form.append('custom_fields[cf_survey_automation]', 'No');
+          
+          ccEmails.forEach((cc) => form.append('cc_emails[]', cc));
+          
+          form.append('attachments[]', Buffer.from(impactCsv), {
+            filename: `Impact_List_${depKey}.csv`,
+            contentType: 'text/csv',
+          });
+
+          console.log('-- Creating Freshdesk ticket...');
+          const fdResp = await fetch(FRESHDESK_API_URL, {
+            method: 'POST',
+            body: form,
+            headers: {
+              Authorization: `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`,
+            },
+          });
+
+          const fdResult = await fdResp.json();
+          if (fdResp.ok) {
+              console.log(`-- Successfully created ticket with ID: ${fdResult.id}`);
+          } else {
+              console.error(`-- Failed to create ticket. Status: ${fdResp.status}, Response: ${JSON.stringify(fdResult)}`);
+          }
+
+          results.push({
+            deployment: depKey,
+            status: fdResp.ok ? 'Success' : 'Failed',
+            ticket_id: fdResult.id || null,
+          });
       }
-
-      const requesterEmail = enableTestMode ? testEmail : [...emails][0] || null;
-      const ccEmails = [...emails].filter((e) => e !== requesterEmail);
-
-      if (!requesterEmail) {
-        results.push({ deployment: depKey, status: 'Skipped (no email)' });
-        continue;
-      }
-
-      const subject = customSubject.replace('[Deployment Name]', depKey);
-      const description = customBody.replace('[Deployment Name]', depKey);
-
-      const impactCsv = rows.map((r) => Object.values(r).join(',')).join('\n');
-
-      const form = new FormData();
-      form.append('subject', subject);
-      form.append('description', `${description}<br><br>--- Auto Generated ---`, { contentType: 'text/html' });
-      form.append('email', requesterEmail);
-      form.append('status', '5');
-      form.append('priority', '1');
-      form.append('group_id', FRESHDESK_TRIAGE_GROUP_ID.toString());
-      form.append('responder_id', FRESHDESK_RESPONDER_ID.toString());
-      form.append('tags[]', 'Support-emergency');
-      form.append('custom_fields[cf_blend_product]', 'Mortgage');
-      form.append('custom_fields[cf_type_of_case]', 'Issue');
-      form.append('custom_fields[cf_disposition477339]', 'P0 Comms');
-      form.append('custom_fields[cf_blend_platform]', 'Lending Platform');
-      form.append('custom_fields[cf_survey_automation]', 'No');
-
-      ccEmails.forEach((cc) => form.append('cc_emails[]', cc));
-
-      form.append('attachments[]', Buffer.from(impactCsv), {
-        filename: `Impact_List_${depKey}.csv`,
-        contentType: 'text/csv',
-      });
-
-      const fdResp = await fetch(FRESHDESK_API_URL, {
-        method: 'POST',
-        body: form,
-        headers: {
-          Authorization: `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`,
-        },
-      });
-
-      const fdResult = await fdResp.json();
-
-      results.push({
-        deployment: depKey,
-        status: fdResp.ok ? 'Success' : 'Failed',
-        ticket_id: fdResult.id || null,
-      });
     }
 
+
     // 6. Return results
+    console.log('Step 6: Returning final results:', results);
     return {
       statusCode: 200,
       body: JSON.stringify({ freshdesk_results: results }),
