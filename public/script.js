@@ -7,7 +7,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const resultsDiv = document.getElementById('results');
     const processButton = document.getElementById('process-button');
 
-    // Show/hide test email input
     testModeCheckbox.addEventListener('change', () => {
         testEmailGroup.style.display = testModeCheckbox.checked ? 'block' : 'none';
     });
@@ -15,15 +14,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusMessage = (text, type = 'info') => {
         const p = document.createElement('p');
         p.textContent = text;
-        p.className = `status-message ${type}`; // Add a class for styling (e.g., info, success, error)
+        p.className = `status-message ${type}`;
         resultsDiv.appendChild(p);
-        resultsDiv.scrollTop = resultsDiv.scrollHeight; // Auto-scroll to the bottom
+        resultsDiv.scrollTop = resultsDiv.scrollHeight;
+    };
+
+    const createDownloadLink = (filename, content) => {
+        const a = document.createElement('a');
+        const blob = new Blob([content], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        a.href = url;
+        a.download = filename;
+        a.textContent = `Download ${filename}`;
+        a.className = 'download-button';
+        return a;
     };
 
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
         
-        resultsDiv.innerHTML = ''; // Clear previous results
+        resultsDiv.innerHTML = '';
         const file = fileInput.files[0];
         
         if (!file) {
@@ -38,9 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
             statusMessage('Starting data processing...');
             statusMessage('Reading file content...', 'info');
             
-            // Read file content
             const fileContent = await file.text();
-
             const payload = {
                 csv_data: fileContent,
                 enable_test_mode: testModeCheckbox.checked,
@@ -65,9 +73,56 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const data = await response.json();
             
-            statusMessage('Processing complete! Here are the results:', 'success');
+            statusMessage('Processing complete!', 'success');
             
-            // Display results in a clear, formatted way
+            // Display Matched Data Previews
+            const previewTitle = document.createElement('h3');
+            previewTitle.textContent = 'Matched Data Previews:';
+            resultsDiv.appendChild(previewTitle);
+
+            for (const depKey in data.matched_data) {
+                const deploymentData = data.matched_data[depKey];
+                const deploymentSection = document.createElement('div');
+                deploymentSection.className = 'deployment-section';
+                resultsDiv.appendChild(deploymentSection);
+
+                const deploymentHeader = document.createElement('h4');
+                deploymentHeader.textContent = `Deployment: ${depKey}`;
+                deploymentSection.appendChild(deploymentHeader);
+
+                // Preview Impact List CSV
+                const impactHeader = document.createElement('p');
+                impactHeader.innerHTML = `<strong>Impact List CSV:</strong>`;
+                deploymentSection.appendChild(impactHeader);
+                const impactPreview = document.createElement('pre');
+                impactPreview.textContent = deploymentData.impact_list;
+                deploymentSection.appendChild(impactPreview);
+
+                // Download Button for Impact List
+                const impactFilename = `Impact_List_${depKey}.csv`;
+                const downloadLink = createDownloadLink(impactFilename, deploymentData.impact_list);
+                deploymentSection.appendChild(downloadLink);
+
+                // Preview Matched Contacts
+                const contactsHeader = document.createElement('p');
+                contactsHeader.innerHTML = `<strong>Matched Contacts:</strong>`;
+                deploymentSection.appendChild(contactsHeader);
+                const contactsList = document.createElement('ul');
+                if (deploymentData.contacts.length > 0) {
+                    deploymentData.contacts.forEach(contact => {
+                        const li = document.createElement('li');
+                        li.textContent = contact;
+                        contactsList.appendChild(li);
+                    });
+                } else {
+                    const li = document.createElement('li');
+                    li.textContent = 'No contacts found.';
+                    contactsList.appendChild(li);
+                }
+                deploymentSection.appendChild(contactsList);
+            }
+
+            // Display Freshdesk Ticket Creation Summary
             const summaryTitle = document.createElement('h3');
             summaryTitle.textContent = 'Freshdesk Ticket Creation Summary:';
             resultsDiv.appendChild(summaryTitle);
@@ -83,7 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else if (result.status === 'Failed') {
                     statusText = `Deployment: ${result.deployment}, Status: ${result.status}`;
                     statusClass = 'error';
-                } else { // Handle 'Skipped' or other statuses
+                } else {
                     statusText = `Deployment: ${result.deployment}, Status: ${result.status}`;
                     statusClass = 'warning';
                 }
