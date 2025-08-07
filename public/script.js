@@ -4,6 +4,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const testModeCheckbox = document.getElementById('test-mode');
     const testEmailInput = document.getElementById('test-email');
     const testEmailGroup = document.getElementById('test-email-group');
+    const modeAuthTokenInput = document.getElementById('mode-auth-token');
+    const freshdeskApiKeyInput = document.getElementById('freshdesk-api-key');
     const resultsDiv = document.getElementById('results');
     const processButton = document.getElementById('process-button');
 
@@ -54,7 +56,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 enable_test_mode: testModeCheckbox.checked,
                 test_email: testEmailInput.value,
                 custom_subject: document.getElementById('custom-subject').value,
-                custom_body: document.getElementById('custom-body').value
+                custom_body: document.getElementById('custom-body').value,
+                mode_auth_token: modeAuthTokenInput.value,
+                freshdesk_api_key: freshdeskApiKeyInput.value
             };
             
             statusMessage('Sending data to backend for processing...', 'info');
