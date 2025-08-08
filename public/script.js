@@ -136,13 +136,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 let statusText = '';
                 let statusClass = '';
 
-                if (result.status === 'Success') {
-                    statusText = `Deployment: ${result.deployment}, Status: ${result.status}, Ticket ID: ${result.ticket_id}`;
-                    statusClass = 'success';
+                // --- MODIFIED LOGIC FOR UI STATUS ---
+                // We now check if a ticket ID was returned, which is the most reliable way
+                // to know if a ticket was successfully created.
+                if (result.ticket_id) {
+                    // If a ticket ID exists, a ticket was created.
+                    // We check if the status is explicitly 'Failed' to report reply issues.
+                    if (result.status === 'Failed') {
+                        statusText = `Deployment: ${result.deployment}, Status: Ticket created but reply failed. Ticket ID: ${result.ticket_id}`;
+                        statusClass = 'warning';
+                    } else {
+                        // All good, both ticket and reply worked.
+                        statusText = `Deployment: ${result.deployment}, Status: ${result.status}, Ticket ID: ${result.ticket_id}`;
+                        statusClass = 'success';
+                    }
                 } else if (result.status === 'Failed') {
-                    statusText = `Deployment: ${result.deployment}, Status: ${result.status}`;
+                    // No ticket ID, and the status is 'Failed', so the initial creation failed.
+                    statusText = `Deployment: ${result.deployment}, Status: Initial ticket creation failed.`;
                     statusClass = 'error';
                 } else {
+                    // Catch-all for other status messages (e.g., 'Skipped')
                     statusText = `Deployment: ${result.deployment}, Status: ${result.status}`;
                     statusClass = 'warning';
                 }
