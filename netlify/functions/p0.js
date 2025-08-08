@@ -56,7 +56,7 @@ exports.handler = async function(event) {
     const MODE_CSV_URL = 'https://app.mode.com/api/blend/reports/77c0a6f31c3c/results/content.csv';
     const FRESHDESK_API_URL = 'https://blendsupport.freshdesk.com/api/v2/tickets';
     const FRESHDESK_CONVERSATIONS_URL = 'https://blendsupport.freshdesk.com/api/v2/tickets';
-    const FRESHDESK_TRIAGE_GROUP_ID = 156000870331;
+    // const FRESHDESK_TRIAGE_GROUP_ID = 156000870331; // This variable is no longer needed
 
     // Parse user CSV data
     const userRecords = parse(csvData, {
@@ -237,12 +237,13 @@ exports.handler = async function(event) {
       const formattedBody = customBody.replace(/\n/g, '<br>');
       const description = formattedBody.replace('[Deployment Name]', depKey);
 
-      // --- 5.1 Create the Freshdesk ticket without sending an initial email ---
+      // --- 5.1 Create the Freshdesk ticket without the full body ---
       log.push(`Creating ticket for deployment '${depKey}'. Requester: ${requesterEmail}, CCs: ${ccEmails.join(', ')}.`);
 
       const ticketForm = new FormData();
       ticketForm.append('subject', subject);
-      ticketForm.append('description', `<div>${description}</div><br><br>--- Auto Generated Ticket ---`, { contentType: 'text/html' });
+      // Use a minimal description for the initial ticket creation
+      ticketForm.append('description', `<div>Ticket created automatically for ${depKey}.</div>`, { contentType: 'text/html' });
       ticketForm.append('email', requesterEmail);
       ticketForm.append('status', '2'); // Status 2 for Open
       ticketForm.append('priority', '1');
@@ -290,27 +291,19 @@ exports.handler = async function(event) {
       }
       log.push(`SUCCESS: Freshdesk ticket created for '${depKey}' with ID: ${ticketResult.id}`);
 
-      // --- 5.2 Send a public reply to the newly created ticket ---
+      // --- 5.2 Send a public reply with the full body text (without re-attaching the file) ---
       const ticketId = ticketResult.id;
       const conversationUrl = `${FRESHDESK_CONVERSATIONS_URL}/${ticketId}/reply`;
       log.push(`Sending public reply to ticket ID: ${ticketId}`);
 
       const replyForm = new FormData();
+      // Use the full, formatted description here
       replyForm.append('body', `<div>${description}</div>`, { contentType: 'text/html' });
       replyForm.append('status', '2'); // Keep the status as Open
 
-      // Re-attach the impact list to the reply
-      if (hasImpactList) {
-        const impactCsv = data.impact_list;
-        const impactBuffer = Buffer.from(impactCsv);
-        replyForm.append('attachments[]', impactBuffer, {
-          filename: `Impact_List_${depKey}.csv`,
-          contentType: 'text/csv',
-          knownLength: impactBuffer.length,
-        });
-        log.push(`- Attached impact list to the reply for ticket ID: ${ticketId}.`);
-      }
-
+      // The previous code had a bug where it was re-attaching the file.
+      // We explicitly removed that logic as the attachment is already on the ticket.
+      
       // Add the CC emails to the reply payload.
       ccEmails.forEach((cc) => replyForm.append('cc_emails[]', cc));
 
