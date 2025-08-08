@@ -55,6 +55,7 @@ exports.handler = async function(event) {
     const MODE_RUN_URL = 'https://app.mode.com/api/blend/reports/77c0a6f31c3c/runs';
     const MODE_CSV_URL = 'https://app.mode.com/api/blend/reports/77c0a6f31c3c/results/content.csv';
     const FRESHDESK_API_URL = 'https://blendsupport.freshdesk.com/api/v2/tickets';
+    const FRESHDESK_CONVERSATIONS_URL = 'https://blendsupport.freshdesk.com/api/v2/tickets';
     const FRESHDESK_TRIAGE_GROUP_ID = 156000870331;
 
     // Parse user CSV data
@@ -190,7 +191,9 @@ exports.handler = async function(event) {
       const deploymentKey = (modeRow[MODE_DEPLOYMENT_COL] || '').toLowerCase().trim();
       if (deploymentKey && deployments[deploymentKey]) {
         const impactRows = deployments[deploymentKey];
-        const impactCsv = impactRows.map(r => Object.values(r).join(',')).join('\n');
+        const impactCsv = [Object.keys(impactRows[0]).join(',')].concat(
+            impactRows.map(r => Object.values(r).join(','))
+        ).join('\n');
 
         const emails = new Set();
         if (modeRow.EMAIL && modeRow.EMAIL.includes('@')) {
@@ -214,7 +217,7 @@ exports.handler = async function(event) {
     }
     log.push(`Found matches for ${Object.keys(matchedData).length} deployments.`);
 
-    // 5. Create Freshdesk tickets
+    // 5. Create Freshdesk tickets and send a public reply
     const freshdeskResults = [];
 
     for (const [depKey, data] of Object.entries(matchedData)) {
@@ -230,64 +233,109 @@ exports.handler = async function(event) {
       
       const subject = customSubject.replace('[Deployment Name]', depKey);
 
-      // --- NEW LOGIC TO PRESERVE FORMATTING ---
       // Replace newline characters with HTML <br> tags.
       const formattedBody = customBody.replace(/\n/g, '<br>');
       const description = formattedBody.replace('[Deployment Name]', depKey);
-      // --- END NEW LOGIC ---
 
+      // --- 5.1 Create the Freshdesk ticket without sending an initial email ---
       log.push(`Creating ticket for deployment '${depKey}'. Requester: ${requesterEmail}, CCs: ${ccEmails.join(', ')}.`);
 
-      const form = new FormData();
-      form.append('subject', subject);
-      form.append('description', `${description}<br><br>--- Auto Generated ---`, { contentType: 'text/html' });
-      form.append('email', requesterEmail);
-      form.append('status', '5');
-      form.append('priority', '1');
-      form.append('group_id', FRESHDESK_TRIAGE_GROUP_ID.toString());
-      form.append('responder_id', FRESHDESK_RESPONDER_ID.toString());
-      form.append('tags[]', 'Support-emergency');
-      form.append('custom_fields[cf_blend_product]', 'Mortgage');
-      form.append('custom_fields[cf_type_of_case]', 'Issue');
-      form.append('custom_fields[cf_disposition477339]', 'P0 Comms');
-      form.append('custom_fields[cf_blend_platform]', 'Lending Platform');
-      form.append('custom_fields[cf_survey_automation]', 'No');
+      const ticketForm = new FormData();
+      ticketForm.append('subject', subject);
+      ticketForm.append('description', `<div>${description}</div><br><br>--- Auto Generated Ticket ---`, { contentType: 'text/html' });
+      ticketForm.append('email', requesterEmail);
+      ticketForm.append('status', '2'); // Status 2 for Open
+      ticketForm.append('priority', '1');
+      ticketForm.append('responder_id', FRESHDESK_RESPONDER_ID.toString());
+      ticketForm.append('tags[]', 'Support-emergency');
+      ticketForm.append('custom_fields[cf_blend_product]', 'Mortgage');
+      ticketForm.append('custom_fields[cf_type_of_case]', 'Issue');
+      ticketForm.append('custom_fields[cf_disposition477339]', 'P0 Comms');
+      ticketForm.append('custom_fields[cf_blend_platform]', 'Lending Platform');
+      ticketForm.append('custom_fields[cf_survey_automation]', 'No');
 
-      ccEmails.forEach((cc) => form.append('cc_emails[]', cc));
+      ccEmails.forEach((cc) => ticketForm.append('cc_emails[]', cc));
 
       if (hasImpactList) {
         const impactCsv = data.impact_list;
         const impactBuffer = Buffer.from(impactCsv);
-        form.append('attachments[]', impactBuffer, {
+        ticketForm.append('attachments[]', impactBuffer, {
           filename: `Impact_List_${depKey}.csv`,
           contentType: 'text/csv',
           knownLength: impactBuffer.length,
         });
-        log.push(`- Attached impact list for '${depKey}'.`);
+        log.push(`- Attached impact list for '${depKey}' during ticket creation.`);
       }
 
-      const headers = form.getHeaders();
-      headers.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
+      const ticketHeaders = ticketForm.getHeaders();
+      ticketHeaders.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
 
-      const fdResp = await fetch(FRESHDESK_API_URL, {
+      const ticketResp = await fetch(FRESHDESK_API_URL, {
         method: 'POST',
-        headers: headers,
-        body: form,
+        headers: ticketHeaders,
+        body: ticketForm,
         duplex: 'half',
       });
 
-      const fdResult = await fdResp.json();
-      if (fdResp.ok) {
-        log.push(`SUCCESS: Freshdesk ticket created for '${depKey}' with ID: ${fdResult.id}`);
+      const ticketResult = await ticketResp.json();
+      if (!ticketResp.ok) {
+        log.push(`FAILED: Freshdesk ticket for '${depKey}' failed with status ${ticketResp.status}. Error: ${JSON.stringify(ticketResult)}`);
+        freshdeskResults.push({
+            deployment: depKey,
+            status: 'Failed',
+            ticket_id: null,
+            error_details: ticketResult,
+        });
+        continue;
+      }
+      log.push(`SUCCESS: Freshdesk ticket created for '${depKey}' with ID: ${ticketResult.id}`);
+
+      // --- 5.2 Send a public reply to the newly created ticket ---
+      const ticketId = ticketResult.id;
+      const conversationUrl = `${FRESHDESK_CONVERSATIONS_URL}/${ticketId}/reply`;
+      log.push(`Sending public reply to ticket ID: ${ticketId}`);
+
+      const replyForm = new FormData();
+      replyForm.append('body', `<div>${description}</div>`, { contentType: 'text/html' });
+      replyForm.append('status', '2'); // Keep the status as Open
+
+      // Re-attach the impact list to the reply
+      if (hasImpactList) {
+        const impactCsv = data.impact_list;
+        const impactBuffer = Buffer.from(impactCsv);
+        replyForm.append('attachments[]', impactBuffer, {
+          filename: `Impact_List_${depKey}.csv`,
+          contentType: 'text/csv',
+          knownLength: impactBuffer.length,
+        });
+        log.push(`- Attached impact list to the reply for ticket ID: ${ticketId}.`);
+      }
+
+      // Add the CC emails to the reply payload.
+      ccEmails.forEach((cc) => replyForm.append('cc_emails[]', cc));
+
+      const replyHeaders = replyForm.getHeaders();
+      replyHeaders.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
+      
+      const replyResp = await fetch(conversationUrl, {
+        method: 'POST',
+        headers: replyHeaders,
+        body: replyForm,
+        duplex: 'half',
+      });
+
+      const replyResult = await replyResp.json();
+      if (replyResp.ok) {
+        log.push(`SUCCESS: Sent public reply to ticket ID: ${ticketId}. Conversation ID: ${replyResult.id}`);
       } else {
-        log.push(`FAILED: Freshdesk ticket for '${depKey}' failed with status ${fdResp.status}. Error: ${JSON.stringify(fdResult)}`);
+        log.push(`FAILED: Failed to send public reply to ticket ID: ${ticketId} with status ${replyResp.status}. Error: ${JSON.stringify(replyResult)}`);
       }
       
       freshdeskResults.push({
         deployment: depKey,
-        status: fdResp.ok ? 'Success' : 'Failed',
-        ticket_id: fdResult.id || null,
-        error_details: fdResp.ok ? null : fdResult,
+        status: ticketResp.ok && replyResp.ok ? 'Success' : 'Failed',
+        ticket_id: ticketId,
+        error_details: replyResp.ok ? null : replyResult,
       });
     }
 
