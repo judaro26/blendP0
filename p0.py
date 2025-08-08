@@ -11,6 +11,7 @@ MODE_RESULTS_CONTENT_CSV_URL = (
     "https://app.mode.com/api/blend/reports/77c0a6f31c3c/results/content.csv"
 )
 DEPLOYMENT_COLUMN_NAMES = ['Tenant', 'TENANT', 'Deployment', 'DEPLOYMENT']
+IMPACT_LIST_COLUMN_NAMES = ['loanId', 'LOANID', 'GUID', 'guid', 'Guid', 'BlendGuid', 'Blend_Guid', 'BLEND_GUID']
 
 # Freshdesk Configuration
 FRESHDESK_DOMAIN = "blendsupport.freshdesk.com"
@@ -80,6 +81,17 @@ def fetch_mode_report_content(auth_token):
         st.error(f"Failed to fetch Mode report content: {e}")
         st.exception(e)
         return None
+
+def has_impact_list_column(df):
+    """
+    Checks if the DataFrame has a column matching any of the impact list column names.
+    Returns True if a matching column is found, False otherwise.
+    """
+    df_cols_lower = [col.lower() for col in df.columns]
+    for col_name in IMPACT_LIST_COLUMN_NAMES:
+        if col_name.lower() in df_cols_lower:
+            return True
+    return False
 
 def match_data(user_df, mode_df):
     """
@@ -350,7 +362,12 @@ if st.button("Start Processing", disabled=not can_process):
 
     st.subheader("Generated Impact Lists")
     st.markdown("Below are the impact lists generated for each deployment. Click to download the corresponding CSV.")
-    
+
+    # Check if a valid impact list column exists in the user's CSV
+    should_attach_impact_list = has_impact_list_column(user_df)
+    if not should_attach_impact_list:
+        st.warning("No valid impact list column found in your CSV. The attachment will not be included in Freshdesk tickets.")
+
     cols = st.columns(2)
     col_idx = 0
     for deployment_name, data in matched_data.items():
@@ -406,10 +423,12 @@ if st.button("Start Processing", disabled=not can_process):
         if enable_test_mode:
             ticket_description += f"\n\n--- This ticket was sent in TEST MODE to {test_email} as requester. Original primary contacts and AMs are NOT CC'd. ---"
         
-        impact_csv_content_bytes = convert_dict_to_csv_string(data['impact_list']).encode('utf-8')
-        impact_file_name = f"Impact_List_{deployment_name.replace(' ', '_').replace('/', '_')}.csv"
-        
-        attachments = [('attachments[]', (impact_file_name, impact_csv_content_bytes, 'text/csv'))]
+        # Conditionally create the attachments list
+        attachments = []
+        if should_attach_impact_list:
+            impact_csv_content_bytes = convert_dict_to_csv_string(data['impact_list']).encode('utf-8')
+            impact_file_name = f"Impact_List_{deployment_name.replace(' ', '_').replace('/', '_')}.csv"
+            attachments = [('attachments[]', (impact_file_name, impact_csv_content_bytes, 'text/csv'))]
 
         with st.spinner(f"Creating Freshdesk ticket for {deployment_name}..."):
             ticket_created = create_freshdesk_ticket(
