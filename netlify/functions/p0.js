@@ -26,7 +26,7 @@ exports.handler = async function(event) {
     const testEmail = body.test_email || 'test@example.com';
     const customSubject = body.custom_subject || 'P0 Alert: [Deployment Name]';
     const customBody = body.custom_body || 'This is a generated ticket for [Deployment Name].';
-    const FRESHDESK_RESPONDER_ID = 156006674011;
+    const FRESHDESK_RESPONDER_ID = 156008293335;
     
     // Retrieve credentials from the payload instead of environment variables
     const MODE_AUTH_TOKEN = body.mode_auth_token;
