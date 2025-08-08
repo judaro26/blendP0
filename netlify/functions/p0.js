@@ -237,13 +237,13 @@ exports.handler = async function(event) {
       const formattedBody = customBody.replace(/\n/g, '<br>');
       const description = formattedBody.replace('[Deployment Name]', depKey);
 
-      // --- 5.1 Create the Freshdesk ticket without the full body ---
-      log.push(`Creating ticket for deployment '${depKey}'. Requester: ${requesterEmail}, CCs: ${ccEmails.join(', ')}.`);
+      // --- 5.1 Create the Freshdesk ticket with the full body and attachment ---
+      log.push(`Creating ticket for deployment '${depKey}' with full body and attachment. Requester: ${requesterEmail}, CCs: ${ccEmails.join(', ')}.`);
 
       const ticketForm = new FormData();
       ticketForm.append('subject', subject);
-      // Use a minimal description for the initial ticket creation
-      ticketForm.append('description', `<div>Ticket created automatically for ${depKey}.</div>`, { contentType: 'text/html' });
+      // Use the full, formatted description here for the initial ticket creation.
+      ticketForm.append('description', `<div>${description}</div>`, { contentType: 'text/html' });
       ticketForm.append('email', requesterEmail);
       ticketForm.append('status', '2'); // Status 2 for Open
       ticketForm.append('priority', '1');
@@ -291,44 +291,15 @@ exports.handler = async function(event) {
       }
       log.push(`SUCCESS: Freshdesk ticket created for '${depKey}' with ID: ${ticketResult.id}`);
 
-      // --- 5.2 Send a public reply with the full body text (without re-attaching the file) ---
-      const ticketId = ticketResult.id;
-      const conversationUrl = `${FRESHDESK_CONVERSATIONS_URL}/${ticketId}/reply`;
-      log.push(`Sending public reply to ticket ID: ${ticketId}`);
-
-      const replyForm = new FormData();
-      // Use the full, formatted description here
-      replyForm.append('body', `<div>${description}</div>`, { contentType: 'text/html' });
-      replyForm.append('status', '2'); // Keep the status as Open
-
-      // The previous code had a bug where it was re-attaching the file.
-      // We explicitly removed that logic as the attachment is already on the ticket.
-      
-      // Add the CC emails to the reply payload.
-      ccEmails.forEach((cc) => replyForm.append('cc_emails[]', cc));
-
-      const replyHeaders = replyForm.getHeaders();
-      replyHeaders.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
-      
-      const replyResp = await fetch(conversationUrl, {
-        method: 'POST',
-        headers: replyHeaders,
-        body: replyForm,
-        duplex: 'half',
-      });
-
-      const replyResult = await replyResp.json();
-      if (replyResp.ok) {
-        log.push(`SUCCESS: Sent public reply to ticket ID: ${ticketId}. Conversation ID: ${replyResult.id}`);
-      } else {
-        log.push(`FAILED: Failed to send public reply to ticket ID: ${ticketId} with status ${replyResp.status}. Error: ${JSON.stringify(replyResult)}`);
-      }
+      // --- 5.2 We no longer need to send a reply with the body and attachment,
+      // as they are already included in the initial ticket creation.
+      // This is the intended behavior to ensure all data is in the first email.
       
       freshdeskResults.push({
         deployment: depKey,
-        status: ticketResp.ok && replyResp.ok ? 'Success' : 'Failed',
-        ticket_id: ticketId,
-        error_details: replyResp.ok ? null : replyResult,
+        status: 'Success',
+        ticket_id: ticketResult.id,
+        error_details: null,
       });
     }
 
