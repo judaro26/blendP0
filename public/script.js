@@ -21,6 +21,17 @@ document.addEventListener('DOMContentLoaded', () => {
         resultsDiv.scrollTop = resultsDiv.scrollHeight;
     };
 
+    const createDownloadLink = (filename, content) => {
+        const a = document.createElement('a');
+        const blob = new Blob([content], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        a.href = url;
+        a.download = filename;
+        a.textContent = `Download ${filename}`;
+        a.className = 'download-button';
+        return a;
+    };
+
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
         
@@ -58,25 +69,104 @@ document.addEventListener('DOMContentLoaded', () => {
                 },
                 body: JSON.stringify(payload)
             });
-            
-            if (response.status === 202) {
-                // The backend has accepted the request and will process it asynchronously
-                const data = await response.json();
-                statusMessage('Processing successfully initiated! 🎉', 'success');
-                statusMessage(`Status: ${data.message}`, 'info');
-                statusMessage(`A Mode report run with token **${data.run_token}** was triggered.`, 'info');
-                statusMessage('The Freshdesk tickets will be created shortly. Please check your Freshdesk account for the results.', 'info');
+
+            if (response.status === 504) {
+                statusMessage('The request timed out. The Freshdesk tickets were likely created successfully but the final status could not be retrieved. Please check Freshdesk for the results.', 'warning');
+                return;
             } else if (!response.ok) {
-                // Handle non-202/non-200 errors
                 const errorData = await response.json();
                 throw new Error(errorData.error || 'Unknown error occurred in backend.');
-            } else {
-                // This case should not be reached with the new backend logic, but we handle it just in case.
-                const data = await response.json();
-                statusMessage('Processing complete!', 'success');
-                // Display results from the successful backend response
-                // ... (existing code to display results) ...
             }
+
+            const data = await response.json();
+            
+            statusMessage('Processing complete!', 'success');
+            
+            // Display Matched Data Previews
+            const previewTitle = document.createElement('h3');
+            previewTitle.textContent = 'Matched Data Previews:';
+            resultsDiv.appendChild(previewTitle);
+
+            for (const depKey in data.matched_data) {
+                const deploymentData = data.matched_data[depKey];
+                const deploymentSection = document.createElement('div');
+                deploymentSection.className = 'deployment-section';
+                resultsDiv.appendChild(deploymentSection);
+
+                const deploymentHeader = document.createElement('h4');
+                deploymentHeader.textContent = `Deployment: ${depKey}`;
+                deploymentSection.appendChild(deploymentHeader);
+
+                // Preview Impact List CSV
+                const impactHeader = document.createElement('p');
+                impactHeader.innerHTML = `<strong>Impact List CSV:</strong>`;
+                deploymentSection.appendChild(impactHeader);
+                const impactPreview = document.createElement('pre');
+                impactPreview.textContent = deploymentData.impact_list;
+                deploymentSection.appendChild(impactPreview);
+
+                // Download Button for Impact List
+                const impactFilename = `Impact_List_${depKey}.csv`;
+                const downloadLink = createDownloadLink(impactFilename, deploymentData.impact_list);
+                deploymentSection.appendChild(downloadLink);
+
+                // Preview Matched Contacts
+                const contactsHeader = document.createElement('p');
+                contactsHeader.innerHTML = `<strong>Matched Contacts:</strong>`;
+                deploymentSection.appendChild(contactsHeader);
+                const contactsList = document.createElement('ul');
+                if (deploymentData.contacts.length > 0) {
+                    deploymentData.contacts.forEach(contact => {
+                        const li = document.createElement('li');
+                        li.textContent = contact;
+                        contactsList.appendChild(li);
+                    });
+                } else {
+                    const li = document.createElement('li');
+                    li.textContent = 'No contacts found.';
+                    contactsList.appendChild(li);
+                }
+                deploymentSection.appendChild(contactsList);
+            }
+
+            // Display Freshdesk Ticket Creation Summary
+            const summaryTitle = document.createElement('h3');
+            summaryTitle.textContent = 'Freshdesk Ticket Creation Summary:';
+            resultsDiv.appendChild(summaryTitle);
+
+            data.freshdesk_results.forEach(result => {
+                const resultP = document.createElement('p');
+                let statusText = '';
+                let statusClass = '';
+
+                // --- MODIFIED LOGIC FOR UI STATUS ---
+                // We now check if a ticket ID was returned, which is the most reliable way
+                // to know if a ticket was successfully created.
+                if (result.ticket_id) {
+                    // If a ticket ID exists, a ticket was created.
+                    // We check if the status is explicitly 'Failed' to report reply issues.
+                    if (result.status === 'Failed') {
+                        statusText = `Deployment: ${result.deployment}, Status: Ticket created but reply failed. Ticket ID: ${result.ticket_id}`;
+                        statusClass = 'warning';
+                    } else {
+                        // All good, both ticket and reply worked.
+                        statusText = `Deployment: ${result.deployment}, Status: ${result.status}, Ticket ID: ${result.ticket_id}`;
+                        statusClass = 'success';
+                    }
+                } else if (result.status === 'Failed') {
+                    // No ticket ID, and the status is 'Failed', so the initial creation failed.
+                    statusText = `Deployment: ${result.deployment}, Status: Initial ticket creation failed.`;
+                    statusClass = 'error';
+                } else {
+                    // Catch-all for other status messages (e.g., 'Skipped')
+                    statusText = `Deployment: ${result.deployment}, Status: ${result.status}`;
+                    statusClass = 'warning';
+                }
+                
+                resultP.textContent = statusText;
+                resultP.className = statusClass;
+                resultsDiv.appendChild(resultP);
+            });
 
         } catch (error) {
             statusMessage(`An error occurred: ${error.message}`, 'error');
