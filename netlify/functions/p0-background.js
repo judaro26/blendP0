@@ -44,7 +44,7 @@ exports.handler = async function(event) {
 
       if (!statusResp.ok) {
         log.push(`Error polling Mode report status on attempt ${attempt + 1}: ${JSON.stringify(statusData)}`);
-        break;
+        return { statusCode: 200, body: JSON.stringify({ message: `Failed to poll Mode status. Check logs.` }) };
       }
       log.push(`- Poll attempt ${attempt + 1}: Status is '${statusData.state}'`);
       if (statusData.state === 'succeeded') {
@@ -59,7 +59,7 @@ exports.handler = async function(event) {
     }
 
     if (!succeeded) {
-      log.push('Mode report did not succeed within max attempts. Proceeding to fetch anyway (may fail).');
+      log.push('Mode report did not succeed within max attempts. Proceeding anyway.');
     } else {
       log.push('Mode report run succeeded.');
     }
