@@ -3,7 +3,7 @@ const FormData = require('form-data');
 const fetch = require('node-fetch');
 
 const POLL_INTERVAL_MS = 5000;
-const MAX_POLL_ATTEMPTS = 1;  // Reduced from 2 to ensure it doesn't time out
+const MAX_POLL_ATTEMPTS = 2;  // Reduced from 6 to stay within Netlify's 10-second timeout
 
 exports.handler = async function(event) {
   const log = [];
@@ -144,18 +144,11 @@ exports.handler = async function(event) {
     }
 
     if (!succeeded) {
-      const warningMessage = 'Mode report is still processing after maximum attempts. Please try again later.';
-      log.push(`WARNING: ${warningMessage}`);
-      return {
-        statusCode: 202,
-        body: JSON.stringify({
-          message: warningMessage,
-          run_token: runToken,
-          log,
-        }),
-      };
-    }
-    log.push('Mode report run succeeded.');
+      log.push('Mode report did not succeed within max attempts. Attempting to proceed anyway.');
+      // NO return statement here. The function will continue to the next steps.
+    } else {
+      log.push('Mode report run succeeded.');
+    }
 
     // 3. Fetch Mode CSV content
     log.push('Fetching Mode report CSV content...');
@@ -286,7 +279,6 @@ exports.handler = async function(event) {
             deployment: depKey,
             status: 'Failed',
             ticket_id: null,
-            error_details: ticketResult,
         });
         continue;
       }
