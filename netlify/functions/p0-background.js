@@ -24,7 +24,9 @@ exports.handler = async function(event) {
     const FRESHDESK_RESPONDER_ID = body.FRESHDESK_RESPONDER_ID;
     const deployments = body.deployments;
     const hasImpactList = body.hasImpactList;
-    log.push(...body.log); // Continue the log from the main function
+    if (body.log) {
+      log.push(...body.log); // Continue the log from the main function
+    }
 
     const MODE_RUN_URL = `https://app.mode.com/api/blend/reports/77c0a6f31c3c/runs`;
     const MODE_CSV_URL = `https://app.mode.com/api/blend/reports/77c0a6f31c3c/results/content.csv`;
@@ -38,26 +40,26 @@ exports.handler = async function(event) {
       const statusResp = await fetch(pollUrl, {
         headers: { Authorization: `Basic ${MODE_AUTH_TOKEN}` },
       });
+      const statusData = await statusResp.json();
 
       if (!statusResp.ok) {
-        throw new Error(`Error polling Mode report status: ${await statusResp.text()}`);
+        log.push(`Error polling Mode report status on attempt ${attempt + 1}: ${JSON.stringify(statusData)}`);
+        break;
       }
-
-      const statusData = await statusResp.json();
       log.push(`- Poll attempt ${attempt + 1}: Status is '${statusData.state}'`);
-
       if (statusData.state === 'succeeded') {
         succeeded = true;
         break;
       }
       if (['failed', 'cancelled'].includes(statusData.state)) {
-        throw new Error(`Mode report run failed: ${statusData.state}`);
+        log.push(`Mode report run failed or was cancelled. State: ${statusData.state}. Exiting.`);
+        return { statusCode: 200, body: JSON.stringify({ message: 'Mode report failed or was cancelled. See logs for details.' }) };
       }
       await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS));
     }
 
     if (!succeeded) {
-      log.push('Mode report did not succeed within max attempts. Proceeding anyway.');
+      log.push('Mode report did not succeed within max attempts. Proceeding to fetch anyway (may fail).');
     } else {
       log.push('Mode report run succeeded.');
     }
@@ -72,7 +74,8 @@ exports.handler = async function(event) {
     });
 
     if (!modeCsvResp.ok) {
-      throw new Error(`Failed to fetch Mode report CSV: ${await modeCsvResp.text()}`);
+      log.push(`Failed to fetch Mode report CSV: ${await modeCsvResp.text()}`);
+      return { statusCode: 200, body: JSON.stringify({ message: 'Failed to fetch Mode CSV. See logs for details.' }) };
     }
 
     const modeCsvText = await modeCsvResp.text();
@@ -84,11 +87,10 @@ exports.handler = async function(event) {
 
     // 4. Match Mode and Impact data by deployment
     const MODE_DEPLOYMENT_COL = 'DEPLOYMENT';
-
     if (!modeRecords[0] || !modeRecords[0][MODE_DEPLOYMENT_COL]) {
       const errorMessage = `Mode report is missing the required '${MODE_DEPLOYMENT_COL}' column.`;
       log.push(`ERROR: ${errorMessage}`);
-      throw new Error(errorMessage);
+      return { statusCode: 200, body: JSON.stringify({ message: 'Missing required column in Mode report. See logs.' }) };
     }
     
     const matchedData = {};
