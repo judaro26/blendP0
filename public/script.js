@@ -70,12 +70,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify(payload)
             });
 
+            // Check if the response body is empty before attempting to parse as JSON
+            const responseBody = await response.text();
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Unknown error occurred in backend.');
+                let errorData = {};
+                try {
+                    errorData = JSON.parse(responseBody);
+                } catch (jsonError) {
+                    throw new Error(errorData.error || 'Unknown error occurred in backend.');
+                }
+            } else if (!responseBody) {
+                statusMessage('Processing is still in progress on the server. Please check Freshdesk for the ticket.', 'info');
+                return;
             }
 
-            const data = await response.json();
+            const data = JSON.parse(responseBody);
             
             statusMessage('Processing complete!', 'success');
             
