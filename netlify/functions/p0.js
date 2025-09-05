@@ -3,7 +3,7 @@ const FormData = require('form-data');
 const fetch = require('node-fetch');
 
 const POLL_INTERVAL_MS = 5000;
-const MAX_POLL_ATTEMPTS = 2;  // Reduced from 6 to stay within Netlify's 10-second timeout
+const MAX_POLL_ATTEMPTS = 2; // Reduced from 6 to stay within Netlify's 10-second timeout
 
 exports.handler = async function(event) {
   const log = [];
@@ -238,7 +238,7 @@ exports.handler = async function(event) {
       // Use the full, formatted description here for the initial ticket creation.
       ticketForm.append('description', `<div>${description}</div>`, { contentType: 'text/html' });
       ticketForm.append('email', requesterEmail);
-      ticketForm.append('status', '2'); // Status 2 for Open
+      ticketForm.append('status', '5'); // Changed from '2' to '5' to close the ticket
       ticketForm.append('priority', '1');
       ticketForm.append('responder_id', FRESHDESK_RESPONDER_ID.toString());
       ticketForm.append('tags[]', 'Support-emergency');
