@@ -248,7 +248,7 @@ exports.handler = async function(event) {
       ticketForm.append('status', '2'); // Status 2 for Open
       ticketForm.append('priority', '1');
       ticketForm.append('responder_id', FRESHDESK_RESPONDER_ID.toString());
-      ticketForm.append('tags[]', 'Support-emergency');
+      ticketForm.append('tags[]', 'Support-emergency','org_nochange');
       ticketForm.append('custom_fields[cf_blend_product]', 'Mortgage');
       ticketForm.append('custom_fields[cf_type_of_case]', 'Issue');
       ticketForm.append('custom_fields[cf_disposition477339]', 'P0 Comms');
