@@ -64,7 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await response.json();
                 statusMessage('Processing successfully initiated! 🎉', 'success');
                 statusMessage(`Status: ${data.message}`, 'info');
-                statusMessage(`A Mode report run with token **${data.run_token}** was triggered.`, 'info');
+                statusMessage(`A Mode report run with token **${data.run_token || 'not provided'}** was triggered.`, 'info');
                 statusMessage('The Freshdesk tickets will be created shortly. Please check your Freshdesk account for the results.', 'info');
             } else if (!response.ok) {
                 // Handle non-202/non-200 errors
