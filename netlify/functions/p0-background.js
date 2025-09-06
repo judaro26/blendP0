@@ -7,25 +7,8 @@ exports.handler = async function(event) {
   const startTimestamp = new Date().toISOString();
   log.push(`Background function started at ${startTimestamp}`);
 
-  let body;
   try {
-    body = JSON.parse(event.body);
-  } catch (err) {
-    const errorMessage = `Failed to parse request body as JSON: ${err.message}`;
-    log.push(`CRITICAL ERROR: ${errorMessage}`);
-    console.error('Background function JSON parse error:', err);
-    return {
-      statusCode: 400,
-      body: JSON.stringify({
-        status: 'Error',
-        ticket_id: null,
-        error_details: { message: errorMessage },
-        log,
-      }),
-    };
-  }
-
-  try {
+    const body = JSON.parse(event.body);
     const enableTestMode = body.enableTestMode;
     const testEmail = body.testEmail;
     const customSubject = body.customSubject;
