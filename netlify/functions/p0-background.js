@@ -1,6 +1,6 @@
-import { parse } from 'csv-parse/sync';
-import FormData from 'form-data';
-import fetch from 'node-fetch';
+const { parse } = require('csv-parse/sync');
+const FormData = require('form-data');
+const fetch = require('node-fetch');
 
 exports.handler = async function(event) {
   const log = [];
@@ -8,6 +8,7 @@ exports.handler = async function(event) {
   log.push(`Background function started at ${startTimestamp}`);
 
   try {
+    // The payload is passed from the main p0.js function
     const body = JSON.parse(event.body);
     const enableTestMode = body.enableTestMode;
     const testEmail = body.testEmail;
@@ -23,101 +24,74 @@ exports.handler = async function(event) {
 
     const FRESHDESK_API_URL = `https://blendsupport.freshdesk.com/api/v2/tickets`;
     
-    const requesterEmail = enableTestMode ? testEmail : data.contacts[0] || null;
-    if (!requesterEmail) {
-      log.push(`SKIPPED: Ticket for deployment '${deploymentKey}' skipped because no requester email was found.`);
-      return {
-        statusCode: 200,
-        body: JSON.stringify({
-          status: 'Skipped (no email)',
-          ticket_id: null,
-          error_details: null,
-          log,
-        }),
-      };
-    }
-    
-    const ccEmails = enableTestMode ? [] : data.contacts.filter((e) => e !== requesterEmail);
-    const subject = customSubject.replace('[Deployment Name]', depKey);
-    const formattedBody = customBody.replace(/\n/g, '<br>');
-    const description = formattedBody.replace('[Deployment Name]', depKey);
-    
-    log.push(`Creating ticket for deployment '${depKey}'. Requester: ${requesterEmail}, CCs: ${ccEmails.join(', ')}.`);
-    const ticketForm = new FormData();
-    ticketForm.append('subject', subject);
-    ticketForm.append('description', `<div>${description}</div>`, { contentType: 'text/html' });
-    ticketForm.append('email', requesterEmail);
-    ticketForm.append('status', '5');
-    ticketForm.append('priority', '1');
-    ticketForm.append('responder_id', FRESHDESK_RESPONDER_ID.toString());
-    ticketForm.append('tags[]', 'Support-emergency');
-    ticketForm.append('tags[]', 'org_nochange');
-    ticketForm.append('custom_fields[cf_blend_product]', 'Mortgage');
-    ticketForm.append('custom_fields[cf_type_of_case]', 'Issue');
-    ticketForm.append('custom_fields[cf_disposition477339]', 'P0 Comms');
-    ticketForm.append('custom_fields[cf_blend_platform]', 'Lending Platform');
-    ticketForm.append('custom_fields[cf_survey_automation]', 'No');
+    // 5. Create Freshdesk tickets
+    const freshdeskResults = [];
+    for (const [depKey, data] of Object.entries(matchedData)) {
+      const requesterEmail = enableTestMode ? testEmail : data.contacts[0] || null;
+      if (!requesterEmail) {
+        log.push(`SKIPPED: Ticket for deployment '${depKey}' skipped because no requester email was found.`);
+        freshdeskResults.push({ deployment: depKey, status: 'Skipped (no email)' });
+        continue;
+      }
+      
+      const ccEmails = enableTestMode ? [] : data.contacts.filter((e) => e !== requesterEmail);
+      const subject = customSubject.replace('[Deployment Name]', depKey);
+      const formattedBody = customBody.replace(/\n/g, '<br>');
+      const description = formattedBody.replace('[Deployment Name]', depKey);
+      
+      log.push(`Creating ticket for deployment '${depKey}'. Requester: ${requesterEmail}, CCs: ${ccEmails.join(', ')}.`);
+      const ticketForm = new FormData();
+      ticketForm.append('subject', subject);
+      ticketForm.append('description', `<div>${description}</div>`, { contentType: 'text/html' });
+      ticketForm.append('email', requesterEmail);
+      ticketForm.append('status', '5');
+      ticketForm.append('priority', '1');
+      ticketForm.append('responder_id', FRESHDESK_RESPONDER_ID.toString());
+      ticketForm.append('tags[]', 'Support-emergency');
+      ticketForm.append('tags[]', 'org_nochange');
+      ticketForm.append('custom_fields[cf_blend_product]', 'Mortgage');
+      ticketForm.append('custom_fields[cf_type_of_case]', 'Issue');
+      ticketForm.append('custom_fields[cf_disposition477339]', 'P0 Comms');
+      ticketForm.append('custom_fields[cf_blend_platform]', 'Lending Platform');
+      ticketForm.append('custom_fields[cf_survey_automation]', 'No');
 
-    ccEmails.forEach((cc) => ticketForm.append('cc_emails[]', cc));
-    
-    if (hasImpactList) {
-      const impactCsv = data.impact_list;
-      const impactBuffer = Buffer.from(impactCsv);
-      ticketForm.append('attachments[]', impactBuffer, {
-        filename: `Impact_List_${depKey}.csv`,
-        contentType: 'text/csv',
-        knownLength: impactBuffer.length,
+      ccEmails.forEach((cc) => ticketForm.append('cc_emails[]', cc));
+      
+      if (hasImpactList) {
+        const impactCsv = data.impact_list;
+        const impactBuffer = Buffer.from(impactCsv);
+        ticketForm.append('attachments[]', impactBuffer, {
+          filename: `Impact_List_${depKey}.csv`,
+          contentType: 'text/csv',
+          knownLength: impactBuffer.length,
+        });
+        log.push(`- Attached impact list for '${depKey}' during ticket creation.`);
+      }
+
+      const ticketHeaders = ticketForm.getHeaders();
+      ticketHeaders.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
+      
+      const ticketResp = await fetch(FRESHDESK_API_URL, {
+        method: 'POST',
+        headers: ticketHeaders,
+        body: ticketForm,
       });
-      log.push(`- Attached impact list for '${depKey}' during ticket creation.`);
-    }
-
-    const ticketHeaders = ticketForm.getHeaders();
-    ticketHeaders.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
-    
-    const ticketResp = await fetch(FRESHDESK_API_URL, {
-      method: 'POST',
-      headers: ticketHeaders,
-      body: ticketForm,
-    });
-    
-    const contentType = ticketResp.headers.get('content-type');
-    if (!contentType || !contentType.includes('application/json')) {
-        const errorText = await ticketResp.text();
-        log.push(`Freshdesk API returned non-JSON response. Status: ${ticketResp.status}, Body: ${errorText}`);
-        return {
-          statusCode: 500,
-          body: JSON.stringify({
-            status: 'Failed',
-            ticket_id: null,
-            error_details: { message: 'Non-JSON response from Freshdesk API', body: errorText },
-            log,
-          }),
-        };
+      
+      const ticketResult = await ticketResp.json();
+      if (!ticketResp.ok) {
+        log.push(`FAILED: Freshdesk ticket for '${depKey}' failed. Error: ${JSON.stringify(ticketResult)}`);
+        freshdeskResults.push({ deployment: depKey, status: 'Failed', ticket_id: null, error_details: ticketResult });
+        continue;
+      }
+      log.push(`SUCCESS: Freshdesk ticket created for '${depKey}' with ID: ${ticketResult.id}`);
+      freshdeskResults.push({ deployment: depKey, status: 'Success', ticket_id: ticketResult.id, error_details: null });
     }
     
-    const ticketResult = await ticketResp.json();
-    if (!ticketResp.ok) {
-      log.push(`FAILED: Freshdesk ticket for '${depKey}' failed. Error: ${JSON.stringify(ticketResult)}`);
-      return {
-        statusCode: ticketResp.status,
-        body: JSON.stringify({
-          status: 'Failed',
-          ticket_id: null,
-          error_details: ticketResult,
-          log,
-        }),
-      };
-    }
-    log.push(`SUCCESS: Freshdesk ticket created for '${depKey}' with ID: ${ticketResult.id}`);
-    
+    // This is a background function, so we don't need to return anything to the user.
+    log.push(`Background function finished at ${new Date().toISOString()}`);
     return {
       statusCode: 200,
-      body: JSON.stringify({
-        status: 'Success',
-        ticket_id: ticketResult.id,
-        error_details: null,
-        log,
-      }),
+      body: JSON.stringify({ message: "Background process complete.", log }),
     };
   } catch (err) {
     const errorMessage = err.message || 'An unexpected error occurred in the background function.';
@@ -125,12 +99,7 @@ exports.handler = async function(event) {
     console.error('Background function handler error:', err);
     return {
       statusCode: 500,
-      body: JSON.stringify({
-        status: 'Error',
-        ticket_id: null,
-        error_details: { message: errorMessage },
-        log,
-      }),
+      body: JSON.stringify({ error: errorMessage, log }),
     };
   }
 };
