@@ -202,14 +202,14 @@ exports.handler = async function(event) {
     }
     log.push(`Found matches for ${Object.keys(matchedData).length} deployments.`);
     
-    // 5. Trigger background function for each matched deployment
-    log.push('Triggering background function for each deployment...');
-    const freshdeskResults = [];
-
-    for (const [depKey, data] of Object.entries(matchedData)) {
-      const payload = {
-        deploymentKey: depKey,
-        data: data,
+    // Trigger the background function and pass only the pre-processed data
+    log.push('Triggering background function for ticket creation...');
+    await fetch('https://' + event.headers.host + '/.netlify/functions/p0-background', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
         enableTestMode,
         testEmail,
         customSubject,
@@ -217,30 +217,19 @@ exports.handler = async function(event) {
         FRESHDESK_API_KEY,
         FRESHDESK_RESPONDER_ID,
         hasImpactList,
+        matchedData,
         log: [...log],
-      };
-
-      const response = await fetch('https://' + event.headers.host + '/.netlify/functions/p0-background', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const result = await response.json();
-      freshdeskResults.push({ deployment: depKey, status: result.status, ticket_id: result.ticket_id, error_details: result.error_details, impact_list_preview: data.impact_list.split('\n').slice(0, 5).join('\n') });
-    }
+      }),
+    });
 
     // 6. Return results immediately
     const endTimestamp = new Date().toISOString();
     log.push(`Function finished at ${endTimestamp}`);
 
     return {
-      statusCode: 200,
+      statusCode: 202,
       body: JSON.stringify({
-        message: 'Processing complete.',
-        results: freshdeskResults,
+        message: 'Processing successfully initiated! Please check Freshdesk for ticket status.',
         log,
       }),
     };
