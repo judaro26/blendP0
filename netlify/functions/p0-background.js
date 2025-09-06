@@ -31,7 +31,12 @@ exports.handler = async function(event) {
       log.push(`SKIPPED: Ticket for deployment '${deploymentKey}' skipped because no requester email was found.`);
       return {
         statusCode: 200,
-        body: JSON.stringify({ message: "Background process complete. No email found.", log }),
+        body: JSON.stringify({
+          status: 'Skipped (no email)',
+          ticket_id: null,
+          error_details: null,
+          log,
+        }),
       };
     }
     
@@ -84,7 +89,12 @@ exports.handler = async function(event) {
       log.push(`FAILED: Freshdesk ticket for '${deploymentKey}' failed. Error: ${JSON.stringify(ticketResult)}`);
       return {
         statusCode: 500,
-        body: JSON.stringify({ error: `Failed to create ticket for ${deploymentKey}`, details: ticketResult, log }),
+        body: JSON.stringify({
+          status: 'Failed',
+          ticket_id: null,
+          error_details: ticketResult,
+          log,
+        }),
       };
     }
     log.push(`SUCCESS: Freshdesk ticket created for '${deploymentKey}' with ID: ${ticketResult.id}`);
@@ -93,7 +103,12 @@ exports.handler = async function(event) {
     log.push(`Background function finished at ${new Date().toISOString()}`);
     return {
       statusCode: 200,
-      body: JSON.stringify({ message: "Background process complete.", log }),
+      body: JSON.stringify({
+        status: 'Success',
+        ticket_id: ticketResult.id,
+        error_details: null,
+        log,
+      }),
     };
   } catch (err) {
     const errorMessage = err.message || 'An unexpected error occurred in the background function.';
@@ -101,7 +116,12 @@ exports.handler = async function(event) {
     console.error('Background function handler error:', err);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: errorMessage, log }),
+      body: JSON.stringify({
+        status: 'Error',
+        ticket_id: null,
+        error_details: { message: errorMessage },
+        log,
+      }),
     };
   }
 };
