@@ -8,7 +8,6 @@ exports.handler = async function(event) {
   log.push(`Background function started at ${startTimestamp}`);
 
   try {
-    // The payload is passed from the main p0.js function
     const body = JSON.parse(event.body);
     const enableTestMode = body.enableTestMode;
     const testEmail = body.testEmail;
@@ -24,7 +23,6 @@ exports.handler = async function(event) {
 
     const FRESHDESK_API_URL = `https://blendsupport.freshdesk.com/api/v2/tickets`;
     
-    // 5. Create Freshdesk tickets
     const freshdeskResults = [];
     for (const [depKey, data] of Object.entries(matchedData)) {
       const requesterEmail = enableTestMode ? testEmail : data.contacts[0] || null;
