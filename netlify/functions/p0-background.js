@@ -81,7 +81,6 @@ exports.handler = async function(event) {
       method: 'POST',
       headers: ticketHeaders,
       body: ticketForm,
-      duplex: 'half',
     });
     
     const ticketResult = await ticketResp.json();
