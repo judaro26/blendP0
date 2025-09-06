@@ -26,6 +26,7 @@ exports.handler = async function(event) {
     const testEmail = body.test_email || 'test@example.com';
     const customSubject = body.custom_subject || 'P0 Alert: [Deployment Name]';
     const customBody = body.custom_body || 'This is a generated ticket for [Deployment Name].';
+    const FRESHDESK_TRIAGE_GROUP_ID = 156000870331;
     const FRESHDESK_RESPONDER_ID = 156008293335;
     
     const MODE_AUTH_TOKEN = body.mode_auth_token;
@@ -218,6 +219,7 @@ exports.handler = async function(event) {
       ticketForm.append('status', '5');
       ticketForm.append('priority', '1');
       ticketForm.append('responder_id', FRESHDESK_RESPONDER_ID.toString());
+      ticketForm.append('group_id', FRESHDESK_TRIAGE_GROUP_ID.toString()); // Add the missing group_id here
       ticketForm.append('tags[]', 'Support-emergency');
       ticketForm.append('tags[]', 'org_nochange');
       ticketForm.append('custom_fields[cf_blend_product]', 'Mortgage');
