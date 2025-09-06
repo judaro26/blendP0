@@ -220,14 +220,16 @@ exports.handler = async function(event) {
         log: [...log],
       };
 
-      await fetch('https://' + event.headers.host + '/.netlify/functions/p0-background', {
+      const response = await fetch('https://' + event.headers.host + '/.netlify/functions/p0-background', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload),
       });
-      freshdeskResults.push({ deployment: depKey, status: 'Initiated' });
+
+      const result = await response.json();
+      freshdeskResults.push({ deployment: depKey, status: result.status, ticket_id: result.ticket_id, error_details: result.error_details });
     }
 
     // 6. Return results immediately
@@ -235,10 +237,10 @@ exports.handler = async function(event) {
     log.push(`Function finished at ${endTimestamp}`);
 
     return {
-      statusCode: 202,
+      statusCode: 200,
       body: JSON.stringify({
-        message: 'Processing successfully initiated! Please check Freshdesk for ticket status.',
-        deployments_initiated: freshdeskResults,
+        message: 'Processing complete.',
+        results: freshdeskResults,
         log,
       }),
     };
