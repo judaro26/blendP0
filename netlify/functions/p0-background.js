@@ -81,6 +81,22 @@ exports.handler = async function(event) {
       body: ticketForm,
     });
     
+    // Check if the response is JSON before parsing
+    const contentType = ticketResp.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+        const errorText = await ticketResp.text();
+        log.push(`Freshdesk API returned non-JSON response. Status: ${ticketResp.status}, Body: ${errorText}`);
+        return {
+          statusCode: 500,
+          body: JSON.stringify({
+            status: 'Failed',
+            ticket_id: null,
+            error_details: { message: 'Non-JSON response from Freshdesk API', body: errorText },
+            log,
+          }),
+        };
+    }
+    
     const ticketResult = await ticketResp.json();
     if (!ticketResp.ok) {
       log.push(`FAILED: Freshdesk ticket for '${deploymentKey}' failed. Error: ${JSON.stringify(ticketResult)}`);
