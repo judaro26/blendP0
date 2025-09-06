@@ -229,7 +229,7 @@ exports.handler = async function(event) {
       });
 
       const result = await response.json();
-      freshdeskResults.push({ deployment: depKey, status: result.status, ticket_id: result.ticket_id, error_details: result.error_details });
+      freshdeskResults.push({ deployment: depKey, status: result.status, ticket_id: result.ticket_id, error_details: result.error_details, impact_list_preview: data.impact_list.split('\n').slice(0, 5).join('\n') });
     }
 
     // 6. Return results immediately
