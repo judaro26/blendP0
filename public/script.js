@@ -15,10 +15,55 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const statusMessage = (text, type = 'info') => {
         const p = document.createElement('p');
-        p.textContent = text;
+        p.innerHTML = text;
         p.className = `status-message ${type}`;
         resultsDiv.appendChild(p);
         resultsDiv.scrollTop = resultsDiv.scrollHeight;
+    };
+
+    const displayResults = (results) => {
+        if (results.length === 0) {
+            statusMessage('No tickets were created.', 'info');
+            return;
+        }
+        
+        results.forEach(result => {
+            const resultItem = document.createElement('div');
+            resultItem.className = 'result-item';
+
+            if (result.status === 'Success') {
+                const message = `✅ Ticket created for **${result.deployment}**! Ticket ID: ${result.ticket_id}.`;
+                const p = document.createElement('p');
+                p.innerHTML = message;
+                p.className = 'status-message success';
+                resultItem.appendChild(p);
+
+                if (result.impact_list) {
+                    const downloadBtn = document.createElement('button');
+                    downloadBtn.textContent = 'Download Impact List';
+                    downloadBtn.className = 'download-button';
+                    downloadBtn.onclick = () => downloadFile(result.impact_list, `Impact_List_${result.deployment}.csv`, 'text/csv');
+                    resultItem.appendChild(downloadBtn);
+                }
+
+            } else {
+                const message = `❌ Ticket creation failed for **${result.deployment}**. Status: ${result.status}`;
+                const p = document.createElement('p');
+                p.innerHTML = message;
+                p.className = 'status-message error';
+                resultItem.appendChild(p);
+            }
+            resultsDiv.appendChild(resultItem);
+        });
+    };
+
+    const downloadFile = (base64Data, filename, mimeType) => {
+      const link = document.createElement('a');
+      link.href = `data:${mimeType};base64,${base64Data}`;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     };
 
     form.addEventListener('submit', async (e) => {
@@ -36,8 +81,7 @@ document.addEventListener('DOMContentLoaded', () => {
         processButton.textContent = 'Processing...';
 
         try {
-            statusMessage('Starting data processing...');
-            statusMessage('Reading file content...', 'info');
+            statusMessage('Starting data processing...', 'info');
             
             const fileContent = await file.text();
             const payload = {
@@ -59,24 +103,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify(payload)
             });
             
-            if (response.status === 202) {
-                // The backend has accepted the request and will process it asynchronously
-                const data = await response.json();
-                statusMessage('Processing successfully initiated! 🎉', 'success');
-                statusMessage(`Status: ${data.message}`, 'info');
-                statusMessage(`A Mode report run with token **${data.run_token || 'not provided'}** was triggered.`, 'info');
-                statusMessage('The Freshdesk tickets will be created shortly. Please check your Freshdesk account for the results.', 'info');
-            } else if (!response.ok) {
-                // Handle non-202/non-200 errors
+            if (!response.ok) {
                 const errorData = await response.json();
                 throw new Error(errorData.error || 'Unknown error occurred in backend.');
-            } else {
-                // This case should not be reached with the new backend logic, but we handle it just in case.
-                const data = await response.json();
-                statusMessage('Processing complete!', 'success');
-                // Display results from the successful backend response
-                // ... (existing code to display results) ...
             }
+
+            const data = await response.json();
+            
+            // Display logs first
+            if (data.log && Array.isArray(data.log)) {
+                data.log.forEach(logEntry => {
+                    const type = logEntry.toLowerCase().includes('error') ? 'error' : 'info';
+                    statusMessage(logEntry, type);
+                });
+            }
+
+            // Display final results
+            if (data.results && Array.isArray(data.results)) {
+                displayResults(data.results);
+            }
+            
+            statusMessage('Processing complete!', 'success');
 
         } catch (error) {
             statusMessage(`An error occurred: ${error.message}`, 'error');
