@@ -1,11 +1,14 @@
 [build]
   publish = "public"
   functions = "netlify/functions"
+  command = "npm install"
 
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
-  node_version = "18"
+
+[build.environment]
+  NODE_VERSION = "18"
 
 [[redirects]]
   from = "/api/*"
