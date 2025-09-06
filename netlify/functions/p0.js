@@ -1,9 +1,8 @@
 const { parse } = require('csv-parse/sync');
-const FormData = require('form-data');
 const fetch = require('node-fetch');
 
 const POLL_INTERVAL_MS = 5000;
-const MAX_POLL_ATTEMPTS = 6;  // Background functions have a longer timeout (15 mins)
+const MAX_POLL_ATTEMPTS = 6;
 
 exports.handler = async function(event) {
   const log = [];
@@ -53,9 +52,8 @@ exports.handler = async function(event) {
     log.push('Received CSV data and configuration.');
 
     const MODE_RUN_URL = 'https://app.mode.com/api/blend/reports/77c0a6f31c3c/runs';
-    const FRESHDESK_API_URL = 'https://blendsupport.freshdesk.com/api/v2/tickets';
-    // const FRESHDESK_TRIAGE_GROUP_ID = 156000870331; // This variable is no longer needed
-
+    const MODE_CSV_URL = 'https://app.mode.com/api/blend/reports/77c0a6f31c3c/results/content.csv';
+    
     // Parse user CSV data
     const userRecords = parse(csvData, {
       columns: true,
@@ -111,8 +109,100 @@ exports.handler = async function(event) {
     const runData = await runResp.json();
     const runToken = runData.token;
     log.push(`Mode report run triggered successfully with token: ${runToken}`);
+
+    // 2. Poll Mode report status
+    let succeeded = false;
+    const pollUrl = `${MODE_RUN_URL}/${runToken}`;
+    log.push('Polling Mode report status...');
+    for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
+        const statusResp = await fetch(pollUrl, {
+            headers: { Authorization: `Basic ${MODE_AUTH_TOKEN}` },
+        });
+        const statusData = await statusResp.json();
+
+        if (!statusResp.ok) {
+            log.push(`Error polling Mode report status on attempt ${attempt + 1}: ${JSON.stringify(statusData)}`);
+            throw new Error('Failed to poll Mode status.');
+        }
+        log.push(`- Poll attempt ${attempt + 1}: Status is '${statusData.state}'`);
+        if (statusData.state === 'succeeded') {
+            succeeded = true;
+            break;
+        }
+        if (['failed', 'cancelled'].includes(statusData.state)) {
+            log.push(`Mode report run failed or was cancelled. State: ${statusData.state}. Exiting.`);
+            throw new Error('Mode report failed or was cancelled.');
+        }
+        await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS));
+    }
+
+    if (!succeeded) {
+      log.push('Mode report did not succeed within max attempts. Proceeding anyway.');
+    } else {
+      log.push('Mode report run succeeded.');
+    }
+
+    // 3. Fetch Mode CSV content
+    log.push('Fetching Mode report CSV content...');
+    const modeCsvResp = await fetch(MODE_CSV_URL, {
+      headers: {
+        Authorization: `Basic ${MODE_AUTH_TOKEN}`,
+        Accept: 'text/csv',
+      },
+    });
+
+    if (!modeCsvResp.ok) {
+      log.push(`Failed to fetch Mode report CSV: ${await modeCsvResp.text()}`);
+      throw new Error('Failed to fetch Mode CSV.');
+    }
+
+    const modeCsvText = await modeCsvResp.text();
+    const modeRecords = parse(modeCsvText, {
+      columns: true,
+      skip_empty_lines: true,
+    });
+    log.push(`Successfully parsed Mode report. Found ${modeRecords.length} records.`);
+
+    // 4. Match Mode and Impact data by deployment
+    const MODE_DEPLOYMENT_COL = 'DEPLOYMENT';
+    if (!modeRecords[0] || !modeRecords[0][MODE_DEPLOYMENT_COL]) {
+        const errorMessage = `Mode report is missing the required '${MODE_DEPLOYMENT_COL}' column.`;
+        log.push(`ERROR: ${errorMessage}`);
+        throw new Error(errorMessage);
+    }
     
-    // Trigger the background function and pass all data
+    const matchedData = {};
+    for (const modeRow of modeRecords) {
+        const deploymentKey = (modeRow[MODE_DEPLOYMENT_COL] || '').toLowerCase().trim();
+        if (deploymentKey && deployments[deploymentKey]) {
+            const impactRows = deployments[deploymentKey];
+            const impactCsv = [Object.keys(impactRows[0]).join(',')].concat(
+                impactRows.map(r => Object.values(r).join(','))
+            ).join('\n');
+            
+            const emails = new Set();
+            if (modeRow.EMAIL && modeRow.EMAIL.includes('@')) {
+                emails.add(modeRow.EMAIL.trim());
+            }
+            if (modeRow.ACCOUNT_MANAGER_EMAIL) {
+                const amEmails = modeRow.ACCOUNT_MANAGER_EMAIL.split(/[;,\s]+/).filter(e => e.includes('@'));
+                amEmails.forEach(e => emails.add(e.trim()));
+            }
+            
+            if (emails.size > 0) {
+                matchedData[deploymentKey] = {
+                    impact_list: impactCsv,
+                    contacts: [...emails],
+                };
+                log.push(`Match found for deployment '${deploymentKey}'. Collected ${emails.size} contact emails.`);
+            } else {
+                log.push(`Match found for deployment '${deploymentKey}', but no valid email contacts were found. Skipping ticket creation for this deployment.`);
+            }
+        }
+    }
+    log.push(`Found matches for ${Object.keys(matchedData).length} deployments.`);
+    
+    // Trigger the background function and pass only the pre-processed data
     log.push('Triggering background function for ticket creation...');
     await fetch('https://' + event.headers.host + '/.netlify/functions/p0-background', {
       method: 'POST',
@@ -120,17 +210,14 @@ exports.handler = async function(event) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        runToken,
-        csvData,
         enableTestMode,
         testEmail,
         customSubject,
         customBody,
-        MODE_AUTH_TOKEN,
         FRESHDESK_API_KEY,
         FRESHDESK_RESPONDER_ID,
-        deployments,
         hasImpactList,
+        matchedData,
         log: [...log],
       }),
     });
