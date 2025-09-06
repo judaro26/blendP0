@@ -1,6 +1,7 @@
 const { parse } = require('csv-parse/sync');
 const FormData = require('form-data');
 const fetch = require('node-fetch');
+const btoa = (str) => Buffer.from(str).toString('base64');
 
 const POLL_INTERVAL_MS = 5000;
 const MAX_POLL_ATTEMPTS = 6;
@@ -219,7 +220,7 @@ exports.handler = async function(event) {
       ticketForm.append('status', '5');
       ticketForm.append('priority', '1');
       ticketForm.append('responder_id', FRESHDESK_RESPONDER_ID.toString());
-      ticketForm.append('group_id', FRESHDESK_TRIAGE_GROUP_ID.toString()); // Add the missing group_id here
+      ticketForm.append('group_id', FRESHDESK_TRIAGE_GROUP_ID.toString());
       ticketForm.append('tags[]', 'Support-emergency');
       ticketForm.append('tags[]', 'org_nochange');
       ticketForm.append('custom_fields[cf_blend_product]', 'Mortgage');
@@ -257,7 +258,13 @@ exports.handler = async function(event) {
         continue;
       }
       log.push(`SUCCESS: Freshdesk ticket created for '${depKey}' with ID: ${ticketResult.id}`);
-      freshdeskResults.push({ deployment: depKey, status: 'Success', ticket_id: ticketResult.id, error_details: null });
+      
+      freshdeskResults.push({
+        deployment: depKey,
+        status: 'Success',
+        ticket_id: ticketResult.id,
+        impact_list: hasImpactList ? btoa(data.impact_list) : null, // Add base64 encoded impact list to response
+      });
     }
     
     const endTimestamp = new Date().toISOString();
