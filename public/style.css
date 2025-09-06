@@ -1,41 +1,47 @@
 /* General body and container styles */
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-    background-color: #f0f2f6;
+    background-color: #F5F7FA;
     margin: 0;
     padding: 20px;
-    color: #333;
+    color: #34495e; /* Dark gray for text */
     display: flex;
     justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
 }
 
 .container {
     background-color: #ffffff;
     padding: 30px;
     border-radius: 12px;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
     max-width: 700px;
     width: 100%;
+    margin-top: 30px;
+    margin-bottom: 30px;
 }
 
 /* Typography */
 h1 {
-    color: #1a1a1a;
-    font-size: 2.5em;
-    border-bottom: 2px solid #e0e0e0;
-    padding-bottom: 10px;
+    color: #2c3e50;
+    font-size: 2.2em;
+    border-bottom: 2px solid #ecf0f1;
+    padding-bottom: 12px;
     margin-top: 0;
+    margin-bottom: 25px;
 }
 
 h2 {
-    color: #333;
-    font-size: 1.8em;
-    margin-top: 25px;
+    color: #34495e;
+    font-size: 1.6em;
+    margin-top: 30px;
+    margin-bottom: 15px;
 }
 
 p {
     line-height: 1.6;
-    color: #555;
+    color: #7f8c8d;
 }
 
 /* Form elements */
@@ -47,27 +53,32 @@ label {
     display: block;
     font-weight: 600;
     margin-top: 15px;
-    margin-bottom: 5px;
+    margin-bottom: 8px;
+    color: #34495e;
+}
+
+.credential-group {
+    margin-bottom: 20px;
 }
 
 input[type="text"],
 input[type="email"],
 textarea,
 input[type="file"] {
-    width: calc(100% - 20px);
-    padding: 12px 10px;
-    border: 1px solid #ccc;
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #dcdde1;
     border-radius: 8px;
     font-size: 1em;
     box-sizing: border-box;
-    margin-top: 5px;
-    transition: border-color 0.3s;
+    transition: all 0.3s ease;
 }
 
 input[type="text"]:focus,
 input[type="email"]:focus,
 textarea:focus {
-    border-color: #4CAF50; /* A nice green accent */
+    border-color: #2B5F2E;
+    box-shadow: 0 0 8px rgba(43, 95, 46, 0.2);
     outline: none;
 }
 
@@ -81,54 +92,59 @@ textarea {
 }
 
 button {
-    background-color: #4CAF50;
+    background-color: #2B5F2E;
     color: white;
-    padding: 15px 25px;
+    padding: 15px 30px;
     border: none;
     border-radius: 8px;
     cursor: pointer;
     font-size: 1.1em;
     font-weight: bold;
-    margin-top: 20px;
-    transition: background-color 0.3s, opacity 0.3s;
+    margin-top: 25px;
+    transition: background-color 0.3s, transform 0.1s;
+    width: 100%;
 }
 
-button:hover {
-    background-color: #45a049;
+button:hover:not(:disabled) {
+    background-color: #265128;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+button:active:not(:disabled) {
+    transform: translateY(0);
 }
 
 button:disabled {
-    background-color: #ccc;
+    background-color: #bdc3c7;
     cursor: not-allowed;
+    opacity: 0.8;
 }
 
 /* Status and Results area */
 #results {
     margin-top: 30px;
     padding: 20px;
-    border-top: 2px dashed #e0e0e0;
+    border-top: 1px solid #ecf0f1;
+    max-height: 400px;
+    overflow-y: auto;
 }
 
 #results p {
-    background-color: #f9f9f9;
-    border-left: 5px solid #4CAF50;
-    padding: 10px 15px;
-    margin-bottom: 10px;
-    border-radius: 4px;
+    padding: 12px 15px;
+    margin-bottom: 12px;
+    border-radius: 6px;
+    font-size: 0.95em;
+    border-left: 5px solid;
+    background-color: #f8f9fa;
+    line-height: 1.5;
 }
 
-/* Info and Warning messages */
-.info-message {
-    background-color: #e6f7ff;
-    color: #004085;
-    border: 1px solid #b3e0ff;
-    padding: 15px;
-    border-radius: 8px;
-    margin-bottom: 20px;
+.status-message.info {
+    border-color: #2B5F2E;
+    background-color: #EDF7ED;
+    color: #2B5F2E;
 }
 
-/* Flexbox utility for small elements */
-.flex-group {
-    display: flex;
-    align-items: center;
-}
+.status-message.error {
+    border-color: #c039
