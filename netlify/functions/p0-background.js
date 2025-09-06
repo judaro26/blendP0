@@ -8,7 +8,6 @@ exports.handler = async function(event) {
   log.push(`Background function started at ${startTimestamp}`);
 
   try {
-    // The payload is passed from the main p0.js function
     const body = JSON.parse(event.body);
     const enableTestMode = body.enableTestMode;
     const testEmail = body.testEmail;
@@ -20,12 +19,11 @@ exports.handler = async function(event) {
     const deploymentKey = body.deploymentKey;
     const data = body.data;
     if (body.log) {
-      log.push(...body.log); // Continue the log from the main function
+      log.push(...body.log);
     }
 
     const FRESHDESK_API_URL = `https://blendsupport.freshdesk.com/api/v2/tickets`;
     
-    // 5. Create a single Freshdesk ticket
     const requesterEmail = enableTestMode ? testEmail : data.contacts[0] || null;
     if (!requesterEmail) {
       log.push(`SKIPPED: Ticket for deployment '${deploymentKey}' skipped because no requester email was found.`);
@@ -50,7 +48,7 @@ exports.handler = async function(event) {
     ticketForm.append('subject', subject);
     ticketForm.append('description', `<div>${description}</div>`, { contentType: 'text/html' });
     ticketForm.append('email', requesterEmail);
-    ticketForm.append('status', '5'); // Status 5 to close the ticket
+    ticketForm.append('status', '5');
     ticketForm.append('priority', '1');
     ticketForm.append('responder_id', FRESHDESK_RESPONDER_ID.toString());
     ticketForm.append('tags[]', 'Support-emergency');
@@ -87,7 +85,7 @@ exports.handler = async function(event) {
     if (!ticketResp.ok) {
       log.push(`FAILED: Freshdesk ticket for '${deploymentKey}' failed. Error: ${JSON.stringify(ticketResult)}`);
       return {
-        statusCode: 500,
+        statusCode: ticketResp.status,
         body: JSON.stringify({
           status: 'Failed',
           ticket_id: null,
@@ -98,8 +96,6 @@ exports.handler = async function(event) {
     }
     log.push(`SUCCESS: Freshdesk ticket created for '${deploymentKey}' with ID: ${ticketResult.id}`);
     
-    // This is a background function, so we don't need to return anything to the user.
-    log.push(`Background function finished at ${new Date().toISOString()}`);
     return {
       statusCode: 200,
       body: JSON.stringify({
