@@ -9,6 +9,8 @@ exports.handler = async function(event) {
 
   try {
     const body = JSON.parse(event.body);
+    log.push(`Successfully parsed event body.`);
+
     const enableTestMode = body.enableTestMode;
     const testEmail = body.testEmail;
     const customSubject = body.customSubject;
@@ -20,6 +22,7 @@ exports.handler = async function(event) {
     if (body.log) {
       log.push(...body.log);
     }
+    log.push(`Received matchedData with ${Object.keys(matchedData).length} entries.`);
 
     const FRESHDESK_API_URL = `https://blendsupport.freshdesk.com/api/v2/tickets`;
     
@@ -85,7 +88,6 @@ exports.handler = async function(event) {
       freshdeskResults.push({ deployment: depKey, status: 'Success', ticket_id: ticketResult.id, error_details: null });
     }
     
-    // This is a background function, so we don't need to return anything to the user.
     log.push(`Background function finished at ${new Date().toISOString()}`);
     return {
       statusCode: 200,
