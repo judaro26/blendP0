@@ -1,15 +1,22 @@
-const { parse } = require('csv-parse/sync');
-const FormData = require('form-data');
-const fetch = require('node-fetch');
+const FRESHDESK_API_URL = `https://blendsupport.freshdesk.com/api/v2/tickets`;
 
-exports.handler = async function(event) {
-  const log = [];
-  const startTimestamp = new Date().toISOString();
-  log.push(`Background function started at ${startTimestamp}`);
+  let body;
+  try {
+    body = JSON.parse(event.body);
+  } catch (err) {
+    const errorMessage = `Failed to parse request body as JSON: ${err.message}`;
+    log.push(`CRITICAL ERROR: ${errorMessage}`);
+    return {
+      statusCode: 400,
+      body: JSON.stringify({
+        status: 'Error',
+        error_details: { message: errorMessage },
+        log,
+      }),
+    };
+  }
 
   try {
-    // The payload is passed from the main p0.js function
-    const body = JSON.parse(event.body);
     const enableTestMode = body.enableTestMode;
     const testEmail = body.testEmail;
     const customSubject = body.customSubject;
@@ -19,10 +26,8 @@ exports.handler = async function(event) {
     const hasImpactList = body.hasImpactList;
     const matchedData = body.matchedData;
     if (body.log) {
-      log.push(...body.log); // Continue the log from the main function
+      log.push(...body.log);
     }
-
-    const FRESHDESK_API_URL = `https://blendsupport.freshdesk.com/api/v2/tickets`;
     
     // 5. Create Freshdesk tickets
     const freshdeskResults = [];
@@ -103,14 +108,3 @@ exports.handler = async function(event) {
     };
   }
 };
-
-function findImpactListColumn(record) {
-  const possibleHeaders = ['loanId', 'LOANID', 'GUID', 'guid', 'Guid', 'BlendGuid', 'Blend_Guid', 'BLEND_GUID'];
-  const recordHeaders = Object.keys(record);
-  for (const header of recordHeaders) {
-    if (possibleHeaders.includes(header)) {
-      return header;
-    }
-  }
-  return null;
-}
