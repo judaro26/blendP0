@@ -231,9 +231,10 @@ exports.handler = async function(event) {
 
       ccEmails.forEach((cc) => ticketForm.append('cc_emails[]', cc));
       
+      let impactBuffer = null;
       if (hasImpactList) {
         const impactCsv = data.impact_list;
-        const impactBuffer = Buffer.from(impactCsv);
+        impactBuffer = Buffer.from(impactCsv);
         ticketForm.append('attachments[]', impactBuffer, {
           filename: `Impact_List_${depKey}.csv`,
           contentType: 'text/csv',
@@ -257,14 +258,54 @@ exports.handler = async function(event) {
         freshdeskResults.push({ deployment: depKey, status: 'Failed', ticket_id: null, error_details: ticketResult });
         continue;
       }
+
       log.push(`SUCCESS: Freshdesk ticket created for '${depKey}' with ID: ${ticketResult.id}`);
-      
-      freshdeskResults.push({
-        deployment: depKey,
-        status: 'Success',
-        ticket_id: ticketResult.id,
-        impact_list: hasImpactList ? btoa(data.impact_list) : null, // Add base64 encoded impact list to response
+
+      // Now create a reply with the same content
+      log.push(`Adding a reply to ticket ${ticketResult.id} to ensure immediate delivery...`);
+      const replyForm = new FormData();
+      replyForm.append('body', `<div>${description}</div>`, { contentType: 'text/html' });
+      replyForm.append('cc_emails[]', requesterEmail); // Freshdesk requires a recipient for the reply
+
+      ccEmails.forEach((cc) => replyForm.append('cc_emails[]', cc));
+
+      if (hasImpactList && impactBuffer) {
+        replyForm.append('attachments[]', impactBuffer, {
+          filename: `Impact_List_${depKey}.csv`,
+          contentType: 'text/csv',
+          knownLength: impactBuffer.length,
+        });
+        log.push(`- Attached impact list to the reply for ticket ${ticketResult.id}.`);
+      }
+
+      const replyHeaders = replyForm.getHeaders();
+      replyHeaders.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
+
+      const replyResp = await fetch(`${FRESHDESK_API_URL}/${ticketResult.id}/reply`, {
+        method: 'POST',
+        headers: replyHeaders,
+        body: replyForm,
       });
+
+      if (!replyResp.ok) {
+        const replyResult = await replyResp.json();
+        log.push(`FAILED: Reply to ticket ${ticketResult.id} failed. Error: ${JSON.stringify(replyResult)}`);
+        freshdeskResults.push({
+          deployment: depKey,
+          status: 'Success (Ticket Created), Failed (Reply)',
+          ticket_id: ticketResult.id,
+          error_details: replyResult,
+          impact_list: hasImpactList ? btoa(data.impact_list) : null,
+        });
+      } else {
+        log.push(`SUCCESS: Reply added to ticket ${ticketResult.id}.`);
+        freshdeskResults.push({
+          deployment: depKey,
+          status: 'Success',
+          ticket_id: ticketResult.id,
+          impact_list: hasImpactList ? btoa(data.impact_list) : null,
+        });
+      }
     }
     
     const endTimestamp = new Date().toISOString();
