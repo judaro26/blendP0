@@ -6,6 +6,7 @@ exports.handler = async function(event) {
   const log = [];
   const startTimestamp = new Date().toISOString();
   log.push(`Background function started at ${startTimestamp}`);
+  log.push(`Raw event body received: ${event.body.substring(0, 200)}...`); // Log the first 200 characters of the raw body
 
   try {
     const body = JSON.parse(event.body);
