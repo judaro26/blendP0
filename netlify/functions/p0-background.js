@@ -2,9 +2,6 @@ const { parse } = require('csv-parse/sync');
 const FormData = require('form-data');
 const fetch = require('node-fetch');
 
-const POLL_INTERVAL_MS = 5000;
-const MAX_POLL_ATTEMPTS = 6;  // Background functions have a 15-minute timeout
-
 exports.handler = async function(event) {
   const log = [];
   const startTimestamp = new Date().toISOString();
@@ -13,117 +10,20 @@ exports.handler = async function(event) {
   try {
     // The payload is passed from the main p0.js function
     const body = JSON.parse(event.body);
-    const runToken = body.runToken;
-    const csvData = body.csvData;
     const enableTestMode = body.enableTestMode;
     const testEmail = body.testEmail;
     const customSubject = body.customSubject;
     const customBody = body.customBody;
-    const MODE_AUTH_TOKEN = body.MODE_AUTH_TOKEN;
     const FRESHDESK_API_KEY = body.FRESHDESK_API_KEY;
     const FRESHDESK_RESPONDER_ID = body.FRESHDESK_RESPONDER_ID;
-    const deployments = body.deployments;
     const hasImpactList = body.hasImpactList;
+    const matchedData = body.matchedData;
     if (body.log) {
       log.push(...body.log); // Continue the log from the main function
     }
 
-    const MODE_RUN_URL = `https://app.mode.com/api/blend/reports/77c0a6f31c3c/runs`;
-    const MODE_CSV_URL = `https://app.mode.com/api/blend/reports/77c0a6f31c3c/results/content.csv`;
     const FRESHDESK_API_URL = `https://blendsupport.freshdesk.com/api/v2/tickets`;
-
-    // 2. Poll Mode report status with a longer timeout
-    let succeeded = false;
-    const pollUrl = `${MODE_RUN_URL}/${runToken}`;
-    log.push('Polling Mode report status in background...');
-    for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
-      const statusResp = await fetch(pollUrl, {
-        headers: { Authorization: `Basic ${MODE_AUTH_TOKEN}` },
-      });
-      const statusData = await statusResp.json();
-
-      if (!statusResp.ok) {
-        log.push(`Error polling Mode report status on attempt ${attempt + 1}: ${JSON.stringify(statusData)}`);
-        return { statusCode: 200, body: JSON.stringify({ message: `Failed to poll Mode status. Check logs.` }) };
-      }
-      log.push(`- Poll attempt ${attempt + 1}: Status is '${statusData.state}'`);
-      if (statusData.state === 'succeeded') {
-        succeeded = true;
-        break;
-      }
-      if (['failed', 'cancelled'].includes(statusData.state)) {
-        log.push(`Mode report run failed or was cancelled. State: ${statusData.state}. Exiting.`);
-        return { statusCode: 200, body: JSON.stringify({ message: 'Mode report failed or was cancelled. See logs for details.' }) };
-      }
-      await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS));
-    }
-
-    if (!succeeded) {
-      log.push('Mode report did not succeed within max attempts. Proceeding anyway.');
-    } else {
-      log.push('Mode report run succeeded.');
-    }
-
-    // 3. Fetch Mode CSV content
-    log.push('Fetching Mode report CSV content...');
-    const modeCsvResp = await fetch(MODE_CSV_URL, {
-      headers: {
-        Authorization: `Basic ${MODE_AUTH_TOKEN}`,
-        Accept: 'text/csv',
-      },
-    });
-
-    if (!modeCsvResp.ok) {
-      log.push(`Failed to fetch Mode report CSV: ${await modeCsvResp.text()}`);
-      return { statusCode: 200, body: JSON.stringify({ message: 'Failed to fetch Mode CSV. See logs for details.' }) };
-    }
-
-    const modeCsvText = await modeCsvResp.text();
-    const modeRecords = parse(modeCsvText, {
-      columns: true,
-      skip_empty_lines: true,
-    });
-    log.push(`Successfully parsed Mode report. Found ${modeRecords.length} records.`);
-
-    // 4. Match Mode and Impact data by deployment
-    const MODE_DEPLOYMENT_COL = 'DEPLOYMENT';
-    if (!modeRecords[0] || !modeRecords[0][MODE_DEPLOYMENT_COL]) {
-      const errorMessage = `Mode report is missing the required '${MODE_DEPLOYMENT_COL}' column.`;
-      log.push(`ERROR: ${errorMessage}`);
-      return { statusCode: 200, body: JSON.stringify({ message: 'Missing required column in Mode report. See logs.' }) };
-    }
     
-    const matchedData = {};
-    for (const modeRow of modeRecords) {
-      const deploymentKey = (modeRow[MODE_DEPLOYMENT_COL] || '').toLowerCase().trim();
-      if (deploymentKey && deployments[deploymentKey]) {
-        const impactRows = deployments[deploymentKey];
-        const impactCsv = [Object.keys(impactRows[0]).join(',')].concat(
-          impactRows.map(r => Object.values(r).join(','))
-        ).join('\n');
-        
-        const emails = new Set();
-        if (modeRow.EMAIL && modeRow.EMAIL.includes('@')) {
-          emails.add(modeRow.EMAIL.trim());
-        }
-        if (modeRow.ACCOUNT_MANAGER_EMAIL) {
-          const amEmails = modeRow.ACCOUNT_MANAGER_EMAIL.split(/[;,\s]+/).filter(e => e.includes('@'));
-          amEmails.forEach(e => emails.add(e.trim()));
-        }
-        
-        if (emails.size > 0) {
-          matchedData[deploymentKey] = {
-            impact_list: impactCsv,
-            contacts: [...emails],
-          };
-          log.push(`Match found for deployment '${deploymentKey}'. Collected ${emails.size} contact emails.`);
-        } else {
-          log.push(`Match found for deployment '${deploymentKey}', but no valid email contacts were found. Skipping ticket creation for this deployment.`);
-        }
-      }
-    }
-    log.push(`Found matches for ${Object.keys(matchedData).length} deployments.`);
-
     // 5. Create Freshdesk tickets
     const freshdeskResults = [];
     for (const [depKey, data] of Object.entries(matchedData)) {
