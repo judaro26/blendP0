@@ -7,8 +7,25 @@ exports.handler = async function(event) {
   const startTimestamp = new Date().toISOString();
   log.push(`Background function started at ${startTimestamp}`);
 
+  let body;
   try {
-    const body = JSON.parse(event.body);
+    body = JSON.parse(event.body);
+  } catch (err) {
+    const errorMessage = `Failed to parse request body as JSON: ${err.message}`;
+    log.push(`CRITICAL ERROR: ${errorMessage}`);
+    console.error('Background function JSON parse error:', err);
+    return {
+      statusCode: 400,
+      body: JSON.stringify({
+        status: 'Error',
+        ticket_id: null,
+        error_details: { message: errorMessage },
+        log,
+      }),
+    };
+  }
+
+  try {
     const enableTestMode = body.enableTestMode;
     const testEmail = body.testEmail;
     const customSubject = body.customSubject;
@@ -81,7 +98,6 @@ exports.handler = async function(event) {
       body: ticketForm,
     });
     
-    // Check if the response is JSON before parsing
     const contentType = ticketResp.headers.get('content-type');
     if (!contentType || !contentType.includes('application/json')) {
         const errorText = await ticketResp.text();
