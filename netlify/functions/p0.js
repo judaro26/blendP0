@@ -166,7 +166,7 @@ exports.handler = async function(event) {
     // 4. Match Mode and Impact data by deployment
     const MODE_DEPLOYMENT_COL = 'DEPLOYMENT';
     if (!modeRecords[0] || !modeRecords[0][MODE_DEPLOYMENT_COL]) {
-        const errorMessage = `Mode report is missing the required '${MODE_DEPLOYMENT_COL}' column.`;
+        const errorMessage = `Mode report is missing the required '${MODE_DEPLOYMENT_COL}' column.`
         log.push(`ERROR: ${errorMessage}`);
         throw new Error(errorMessage);
     }
@@ -202,14 +202,14 @@ exports.handler = async function(event) {
     }
     log.push(`Found matches for ${Object.keys(matchedData).length} deployments.`);
     
-    // Trigger the background function and pass only the pre-processed data
-    log.push('Triggering background function for ticket creation...');
-    await fetch('https://' + event.headers.host + '/.netlify/functions/p0-background', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
+    // 5. Trigger background function for each matched deployment
+    log.push('Triggering background function for each deployment...');
+    const freshdeskResults = [];
+
+    for (const [depKey, data] of Object.entries(matchedData)) {
+      const payload = {
+        deploymentKey: depKey,
+        data: data,
         enableTestMode,
         testEmail,
         customSubject,
@@ -217,10 +217,18 @@ exports.handler = async function(event) {
         FRESHDESK_API_KEY,
         FRESHDESK_RESPONDER_ID,
         hasImpactList,
-        matchedData,
         log: [...log],
-      }),
-    });
+      };
+
+      await fetch('https://' + event.headers.host + '/.netlify/functions/p0-background', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload),
+      });
+      freshdeskResults.push({ deployment: depKey, status: 'Initiated' });
+    }
 
     // 6. Return results immediately
     const endTimestamp = new Date().toISOString();
@@ -230,7 +238,7 @@ exports.handler = async function(event) {
       statusCode: 202,
       body: JSON.stringify({
         message: 'Processing successfully initiated! Please check Freshdesk for ticket status.',
-        run_token: runToken,
+        deployments_initiated: freshdeskResults,
         log,
       }),
     };
