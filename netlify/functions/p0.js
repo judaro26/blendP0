@@ -1,5 +1,5 @@
-const { parse } = require('csv-parse/sync');
-const fetch = require('node-fetch');
+import { parse } from 'csv-parse/sync';
+import fetch from 'node-fetch';
 
 const POLL_INTERVAL_MS = 5000;
 const MAX_POLL_ATTEMPTS = 6;
