@@ -1,4 +1,5 @@
 const { parse } = require('csv-parse/sync');
+const FormData = require('form-data');
 const fetch = require('node-fetch');
 
 const POLL_INTERVAL_MS = 5000;
@@ -27,7 +28,6 @@ exports.handler = async function(event) {
     const customBody = body.custom_body || 'This is a generated ticket for [Deployment Name].';
     const FRESHDESK_RESPONDER_ID = 156008293335;
     
-    // Retrieve credentials from the payload instead of environment variables
     const MODE_AUTH_TOKEN = body.mode_auth_token;
     const FRESHDESK_API_KEY = body.freshdesk_api_key;
 
@@ -53,8 +53,8 @@ exports.handler = async function(event) {
 
     const MODE_RUN_URL = 'https://app.mode.com/api/blend/reports/77c0a6f31c3c/runs';
     const MODE_CSV_URL = 'https://app.mode.com/api/blend/reports/77c0a6f31c3c/results/content.csv';
+    const FRESHDESK_API_URL = 'https://blendsupport.freshdesk.com/api/v2/tickets';
     
-    // Parse user CSV data
     const userRecords = parse(csvData, {
       columns: true,
       skip_empty_lines: true,
@@ -70,7 +70,6 @@ exports.handler = async function(event) {
       };
     }
     
-    // Check if the impact list contains a valid loan ID column
     const loanIdColumn = findImpactListColumn(userRecords[0]);
     const hasImpactList = !!loanIdColumn;
     if (hasImpactList) {
@@ -79,7 +78,6 @@ exports.handler = async function(event) {
       log.push('No valid impact list column found. No attachment will be created.');
     }
 
-    // Group user records by deployment (case insensitive)
     const deployments = {};
     for (const row of userRecords) {
       const deploymentKey = (row.Tenant || row.TENANT || row.Deployment || row.DEPLOYMENT || row.tenant || '').toLowerCase().trim();
@@ -90,7 +88,6 @@ exports.handler = async function(event) {
     }
     log.push(`Grouped user records into ${Object.keys(deployments).length} deployments.`);
 
-    // 1. Trigger Mode report run
     log.push('Triggering Mode report run...');
     const runResp = await fetch(MODE_RUN_URL, {
       method: 'POST',
@@ -110,7 +107,6 @@ exports.handler = async function(event) {
     const runToken = runData.token;
     log.push(`Mode report run triggered successfully with token: ${runToken}`);
 
-    // 2. Poll Mode report status
     let succeeded = false;
     const pollUrl = `${MODE_RUN_URL}/${runToken}`;
     log.push('Polling Mode report status...');
@@ -142,7 +138,6 @@ exports.handler = async function(event) {
       log.push('Mode report run succeeded.');
     }
 
-    // 3. Fetch Mode CSV content
     log.push('Fetching Mode report CSV content...');
     const modeCsvResp = await fetch(MODE_CSV_URL, {
       headers: {
@@ -163,10 +158,9 @@ exports.handler = async function(event) {
     });
     log.push(`Successfully parsed Mode report. Found ${modeRecords.length} records.`);
 
-    // 4. Match Mode and Impact data by deployment
     const MODE_DEPLOYMENT_COL = 'DEPLOYMENT';
     if (!modeRecords[0] || !modeRecords[0][MODE_DEPLOYMENT_COL]) {
-        const errorMessage = `Mode report is missing the required '${MODE_DEPLOYMENT_COL}' column.`
+        const errorMessage = `Mode report is missing the required '${MODE_DEPLOYMENT_COL}' column.`;
         log.push(`ERROR: ${errorMessage}`);
         throw new Error(errorMessage);
     }
@@ -201,35 +195,77 @@ exports.handler = async function(event) {
         }
     }
     log.push(`Found matches for ${Object.keys(matchedData).length} deployments.`);
-    
-    // Trigger the background function and pass only the pre-processed data
-    log.push('Triggering background function for ticket creation...');
-    await fetch('https://' + event.headers.host + '/.netlify/functions/p0-background', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        enableTestMode,
-        testEmail,
-        customSubject,
-        customBody,
-        FRESHDESK_API_KEY,
-        FRESHDESK_RESPONDER_ID,
-        hasImpactList,
-        matchedData,
-        log: [...log],
-      }),
-    });
 
-    // 6. Return results immediately
+    const freshdeskResults = [];
+    for (const [depKey, data] of Object.entries(matchedData)) {
+      const requesterEmail = enableTestMode ? testEmail : data.contacts[0] || null;
+      if (!requesterEmail) {
+        log.push(`SKIPPED: Ticket for deployment '${depKey}' skipped because no requester email was found.`);
+        freshdeskResults.push({ deployment: depKey, status: 'Skipped (no email)' });
+        continue;
+      }
+      
+      const ccEmails = enableTestMode ? [] : data.contacts.filter((e) => e !== requesterEmail);
+      const subject = customSubject.replace('[Deployment Name]', depKey);
+      const formattedBody = customBody.replace(/\n/g, '<br>');
+      const description = formattedBody.replace('[Deployment Name]', depKey);
+      
+      log.push(`Creating ticket for deployment '${depKey}'. Requester: ${requesterEmail}, CCs: ${ccEmails.join(', ')}.`);
+      const ticketForm = new FormData();
+      ticketForm.append('subject', subject);
+      ticketForm.append('description', `<div>${description}</div>`, { contentType: 'text/html' });
+      ticketForm.append('email', requesterEmail);
+      ticketForm.append('status', '5');
+      ticketForm.append('priority', '1');
+      ticketForm.append('responder_id', FRESHDESK_RESPONDER_ID.toString());
+      ticketForm.append('tags[]', 'Support-emergency');
+      ticketForm.append('tags[]', 'org_nochange');
+      ticketForm.append('custom_fields[cf_blend_product]', 'Mortgage');
+      ticketForm.append('custom_fields[cf_type_of_case]', 'Issue');
+      ticketForm.append('custom_fields[cf_disposition477339]', 'P0 Comms');
+      ticketForm.append('custom_fields[cf_blend_platform]', 'Lending Platform');
+      ticketForm.append('custom_fields[cf_survey_automation]', 'No');
+
+      ccEmails.forEach((cc) => ticketForm.append('cc_emails[]', cc));
+      
+      if (hasImpactList) {
+        const impactCsv = data.impact_list;
+        const impactBuffer = Buffer.from(impactCsv);
+        ticketForm.append('attachments[]', impactBuffer, {
+          filename: `Impact_List_${depKey}.csv`,
+          contentType: 'text/csv',
+          knownLength: impactBuffer.length,
+        });
+        log.push(`- Attached impact list for '${depKey}' during ticket creation.`);
+      }
+
+      const ticketHeaders = ticketForm.getHeaders();
+      ticketHeaders.Authorization = `Basic ${Buffer.from(FRESHDESK_API_KEY + ':X').toString('base64')}`;
+      
+      const ticketResp = await fetch(FRESHDESK_API_URL, {
+        method: 'POST',
+        headers: ticketHeaders,
+        body: ticketForm,
+      });
+      
+      const ticketResult = await ticketResp.json();
+      if (!ticketResp.ok) {
+        log.push(`FAILED: Freshdesk ticket for '${depKey}' failed. Error: ${JSON.stringify(ticketResult)}`);
+        freshdeskResults.push({ deployment: depKey, status: 'Failed', ticket_id: null, error_details: ticketResult });
+        continue;
+      }
+      log.push(`SUCCESS: Freshdesk ticket created for '${depKey}' with ID: ${ticketResult.id}`);
+      freshdeskResults.push({ deployment: depKey, status: 'Success', ticket_id: ticketResult.id, error_details: null });
+    }
+    
     const endTimestamp = new Date().toISOString();
     log.push(`Function finished at ${endTimestamp}`);
 
     return {
-      statusCode: 202,
+      statusCode: 200,
       body: JSON.stringify({
-        message: 'Processing successfully initiated! Please check Freshdesk for ticket status.',
+        message: 'Processing complete.',
+        results: freshdeskResults,
         log,
       }),
     };
